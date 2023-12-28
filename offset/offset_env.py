@@ -25,7 +25,7 @@ class offset_env():
         self.S0 = S0
         self.R = R 
         self.pen = pen
-        self.X_max = 2.0 * R
+        self.X_max = 1.5 * R
         self.nu_max = 100.0
         
         self.N = N
@@ -69,8 +69,9 @@ class offset_env():
         yp[:,2] = y[:,2] + self.xi * G + nu * self.dt
         
         # Reward
-        r = -( y[:,1] * nu *self.dt + 0.5*self.kappa * nu**2 * self.dt \
-              + self.c * G \
-                  + self.pen * (torch.abs(yp[:,0]-self.T)<1e-8).int() * torch.maximum(self.R - yp[:,2], torch.tensor(0)))
+        r = -( y[:,1] * nu *self.dt \
+              + 0.5 * self.kappa * nu**2 * self.dt \
+                  + self.c * G \
+                      + self.pen * (torch.abs(yp[:,0]-self.T)<1e-8).int() * torch.maximum(self.R - yp[:,2], torch.tensor(0)))
         
         return yp, r

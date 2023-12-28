@@ -58,7 +58,7 @@ class ANN(nn.Module):
 
         if self.out_activation is not None:
             for i in range(y.shape[-1]):
-                y = self.out_activation[i](y)
+                y[...,i] = self.out_activation[i](y[...,i])
             
         return y
 
@@ -216,18 +216,20 @@ class DDPG():
 
             # step in the environment
             Y_p, r = self.env.step(Y, a)
+            
+            ind_T = 1.0 * (torch.abs(Y_p[:,0] - self.env.T) <= 1e-6)
 
             # compute the Q(S', a*)
             # optimal policy at t+1
             a_p = self.pi['net'](self.normalize(Y_p, 'state')).detach()
             
             # compute the target for Q
-            target = r.reshape(-1,1) + self.gamma * \
+            target = r.reshape(-1,1) + (1.0 - ind_T) * self.gamma * \
                 self.Q_target['net'](torch.cat(( \
                                                 self.normalize(Y_p, 'state'), \
                                                 self.normalize(a_p, 'policy')), \
                                                axis=1))
-            
+                  
             loss = torch.mean((target.detach() - Q)**2)
             
             # compute the gradients
@@ -403,7 +405,7 @@ class DDPG():
             plt.xlabel(r"$t$")
 
 
-        plot(self.env.t, (S-S[:,0].reshape(S.shape[0],-1)), 1, r"$S_t-S_0$" )
+        plot(self.env.t, (S), 1, r"$S_t$" )
         plot(self.env.t, X, 2, r"$X_t$")
         plot(self.env.t[:-1], np.cumsum(r, axis=1), 3, r"$r_t$")
         plot(self.env.t[:-1], a[:,0,:], 4, r"$\nu_t$")
@@ -412,11 +414,12 @@ class DDPG():
 
         plt.subplot(2, 3, 6)
         plt.hist(np.sum(r,axis=1), bins=51)
+        #plt.set_title('PnL')
 
 
         plt.tight_layout()
         
-        plt.savefig("path_"  +self.name + "_" + name + ".pdf", format='pdf', bbox_inches='tight')
+       # plt.savefig("path_"  +self.name + "_" + name + ".pdf", format='pdf', bbox_inches='tight')
         plt.show()   
         
         t = 1.0* self.env.t
@@ -429,7 +432,7 @@ class DDPG():
 
         '''
         
-        NS = 101
+        NS = 51
         S = torch.linspace(0, 1.5 * self.env.pen, NS)
         
         NX = 51
