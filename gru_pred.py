@@ -71,12 +71,14 @@ class gru_pred():
                  I_max = 5,
                  n_ahead=1,
                  decay_rate=0.99,
-                 seed = 10002197):
+                 seed = 10002197,
+                 kappa=1,
+                 sigma=0.1):
 
         np.random.seed(seed)  
         torch.manual_seed(seed)
         
-        self.env = MR_env(S_0=1, kappa=1, sigma=0.0001, theta=1, dt=dt, T = T, I_max=I_max, lambd=0.05)
+        self.env = MR_env(S_0=1, kappa=kappa, sigma=sigma, theta=1, dt=dt, T = T, I_max=I_max, lambd=0.05)
         
         self.seq_length = seq_length
         self.n_ahead = n_ahead
@@ -99,14 +101,14 @@ class gru_pred():
         
         S, _ = self.env.Randomize_Start(batch_size)
         
-        self.a = torch.min(S)
-        self.b = torch.max(S) - self.a
+        self.a = torch.mean(S)
+        self.b = torch.std(S)
         
         
     def grab_data(self, batch_size):
         
         S, _ = self.env.Randomize_Start(batch_size)
-        x_norm = (2*(S - self.a)/self.b)-1
+        x_norm = S #(S - self.a)/self.b
         
         x, y = self.create_snippets(x_norm)
         
@@ -125,11 +127,52 @@ class gru_pred():
         
         for i in range(x_cp.shape[0]-self.seq_length-self.n_ahead):
             Z[:,i,:] = x_cp[i:i+self.seq_length,:]
-            Y[i,:] = x_cp[i+self.seq_length+(self.n_ahead-1),:]
+            Y[i,:] = x_cp[i+self.seq_length+(self.n_ahead-1),:] \
+                - x_cp[i+self.seq_length+(self.n_ahead-1)-1,:]
         
         return Z.transpose(0,1), Y
     
-    
+    def plot_losses(self):
+        
+        losses = np.array(self.losses)
+        l, l_err = self.moving_average(losses, 200)
+        
+        plt.plot(np.arange(len(l)), losses, alpha=0.1, color='k')
+        plt.fill_between(np.arange(len(l)), l-l_err, l+l_err, alpha=0.2)
+        plt.plot(np.arange(len(l)), l)
+        plt.yscale('log')
+        plt.show()
+        
+    def moving_average(self, x, n):
+        
+        y = np.zeros(len(x))
+        y_err = np.zeros(len(x))
+        y[0] = np.nan
+        y_err[0] = np.nan        
+        
+        m1 = 0
+        m2 = 0
+        
+        for i in range(1,len(x)):
+            
+            if i < n+1:
+                
+                m1 = np.mean(x[:i])
+                m2 = np.mean(x[:i]**2)
+                y[i] = m1
+                y_err[i] = np.sqrt(m2 - m1**2)
+                
+            else:
+                
+                m1 = m1 + (1/n)*(x[i-1]-x[i-n-1])
+                m2 = m2 + (1/n)*(x[i-1]**2-x[i-n-1]**2)
+                
+                y[i] = m1
+                y_err[i] = np.sqrt(m2-m1**2)
+                
+        return y, y_err        
+        
+        
     def train(self, num_epochs=10_000):
         
         for epoch in tqdm(range(num_epochs)):
@@ -139,7 +182,7 @@ class gru_pred():
             
             outputs = self.model(x)
             
-            loss = torch.mean((y - outputs)**2)
+            loss = torch.sqrt(torch.mean((y - outputs)**2))
             
             # Backward and optimize
             self.optimizer.zero_grad()
@@ -148,43 +191,54 @@ class gru_pred():
             
             self.losses.append(loss.item())
             
-            if (epoch+1) % 50 ==0:
+            if (epoch+1) % 25 ==0:
                 self.scheduler.step()
     
-            if epoch == 0 or (epoch+1) % 100 == 0:
+            if epoch == 0 or (epoch+1) % 500 == 0:
                 print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item():.4f}')
+                self.pred()
+                self.plot_losses()
                 
             # if epoch > 100:
             #     if early_stopping(loss.item()):
             #         print("stopping early")
             #         break   
     
-        plt.plot(self.losses)
-        plt.yscale('log')
-        
     def pred(self):
         
         x, y = self.grab_data(1)
         
         pred = self.model(x).detach()
         
-        plt.scatter(np.arange(y.shape[0]), y.squeeze().numpy(),s=10)
-        plt.scatter(np.arange(y.shape[0]), pred.squeeze().numpy(),s=10)
+        plt.scatter(np.arange(y.shape[0]), y.squeeze().numpy(),s=10, label="Y")
+        plt.scatter(np.arange(y.shape[0]), pred.squeeze().numpy(),s=10, label="$E[Y|X]$")
+        plt.legend()
+        plt.xlabel(r"$t$")
         plt.show()
         
-        plt.hist((y-pred).squeeze().numpy(), bins=np.linspace(-0.2,0.2,21), alpha=0.5)
-        plt.hist((y-x[:,-1,:]).squeeze().numpy(), bins=np.linspace(-0.2,0.2,21), alpha=0.5)
+        
+        plt.scatter(x[:,-1,0].numpy(), y.squeeze().numpy(),s=10, label="Y")
+        plt.scatter(x[:,-1,0].numpy(), pred.squeeze().numpy(),s=10, label="$E[Y|X]$")
+        plt.legend()
+        plt.xlabel(r"$S_t$")
         plt.show()
+        
+        # bins = np.linspace(-0.01,0.01,21)
+        # plt.hist((y-pred).squeeze().numpy(), bins=bins, alpha=0.5)
+        # plt.hist((y-x[:,-1,:]).squeeze().numpy(), bins=bins, alpha=0.5)
+        # plt.show()
         
         model_err = (y-pred).squeeze().numpy()
-        print( np.mean(model_err), np.std(model_err) )
+        print( np.sqrt(np.mean(model_err**2)), np.std(model_err) )
         
-        naive_err=(y-x[:,-1,:]).squeeze().numpy()
-        print( np.mean(naive_err), np.std(naive_err) )
+        naive_err=(y).squeeze().numpy()
+        print( np.sqrt(np.mean(naive_err**2)), np.std(naive_err) )
         
         S, _ = self.env.Randomize_Start(1)
         
         plt.plot(S.numpy().T)
+        plt.xlabel(r"$t$")
+        plt.ylabel(r"$S_t$")
         plt.show()
         
         
