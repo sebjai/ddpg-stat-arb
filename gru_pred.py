@@ -127,8 +127,9 @@ class gru_pred():
         
         for i in range(x_cp.shape[0]-self.seq_length-self.n_ahead):
             Z[:,i,:] = x_cp[i:i+self.seq_length,:]
-            Y[i,:] = x_cp[i+self.seq_length+(self.n_ahead-1),:] \
-                - x_cp[i+self.seq_length+(self.n_ahead-1)-1,:]
+            # Y[i,:] = x_cp[i+self.seq_length+(self.n_ahead-1),:] \
+            #     - x_cp[i+self.seq_length+(self.n_ahead-1)-1,:]
+            Y[i,:] = x_cp[i+self.seq_length+(self.n_ahead-1),:]
         
         return Z.transpose(0,1), Y
     
@@ -173,7 +174,7 @@ class gru_pred():
         return y, y_err        
         
         
-    def train(self, num_epochs=10_000):
+    def train(self, num_epochs=10_000, n_print=100):
         
         for epoch in tqdm(range(num_epochs)):
             
@@ -194,7 +195,7 @@ class gru_pred():
             if (epoch+1) % 25 ==0:
                 self.scheduler.step()
     
-            if epoch == 0 or (epoch+1) % 500 == 0:
+            if epoch == 0 or (epoch+1) % n_print == 0:
                 print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item():.4f}')
                 self.pred()
                 self.plot_losses()
@@ -231,7 +232,7 @@ class gru_pred():
         model_err = (y-pred).squeeze().numpy()
         print( np.sqrt(np.mean(model_err**2)), np.std(model_err) )
         
-        naive_err=(y).squeeze().numpy()
+        naive_err=(y-x[:,-1,0]).squeeze().numpy()
         print( np.sqrt(np.mean(naive_err**2)), np.std(naive_err) )
         
         S, _ = self.env.Randomize_Start(1)

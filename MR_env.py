@@ -30,6 +30,7 @@ class MR_env():
         self.dt = dt  # time steps
         self.T = T
         self.N = int(self.T/self.dt)+1
+        self.t = np.linspace(0,self.T, self.N)
         
         self.inv_vol = self.sigma/np.sqrt(2.0*self.kappa)
         self.eff_vol = self.sigma* np.sqrt((1-np.exp(-2*self.kappa*self.dt))/(2*self.kappa))
@@ -55,8 +56,15 @@ class MR_env():
 
         S[:, 0] = s0#self.S_0
         I[:, 0] = i0
-
+        
+        tau = -np.log(np.random.rand())/0.2
+        
         for t in (range(self.N-1)):
+            
+            if self.t[t] < tau:
+                self.theta = 1
+            else:
+                self.theta = 1.25
 
             S[:, t+1], I[:,t+1], _ = self.step(t*self.dt, S[:,t], I[:,t], 0*I[:,t])
 
