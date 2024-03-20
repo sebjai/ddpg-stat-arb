@@ -23,10 +23,7 @@ class gru(nn.Module):
         self.gru = nn.GRU(input_size, gru_hidden_size, num_layers=gru_num_layers, batch_first=True)
         self.dropout = nn.Dropout(dropout_rate)
         self.fc1 = nn.Linear(gru_hidden_size*gru_num_layers, lin_hidden_size)
-        
         self.prop_h_to_h = nn.ModuleList([nn.Linear(lin_hidden_size, lin_hidden_size) for n in range(3)])
-        
-        
         #self.fc2 = nn.Linear(hidden_size, hidden_size)  # Second additional linear layer
         self.fc3 = nn.Linear(lin_hidden_size, output_size)  # Output linear layer
 
@@ -229,10 +226,10 @@ class gru_pred():
         # plt.show()
         
         model_err = (y-pred).squeeze().numpy()
-        print( np.sqrt(np.mean(model_err**2)), np.std(model_err) )
+        print('average model error =', np.sqrt(np.mean(model_err**2)), 'model error std =',np.std(model_err) )
         
         naive_err=(y).squeeze().numpy()
-        print( np.sqrt(np.mean(naive_err**2)), np.std(naive_err) )
+        print('average naive error =', np.sqrt(np.mean(naive_err**2)), 'naive error std =', np.std(naive_err) )
         
         S, _ = self.env.Randomize_Start(1)
         
