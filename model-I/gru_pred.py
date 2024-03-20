@@ -24,7 +24,7 @@ class gru(nn.Module):
         self.dropout = nn.Dropout(dropout_rate)
         self.fc1 = nn.Linear(gru_hidden_size*gru_num_layers, lin_hidden_size)
         
-        self.prop_h_to_h = nn.ModuleList([nn.Linear(lin_hidden_size, lin_hidden_size) for n in range(3)])
+        self.prop_h_to_h = nn.ModuleList([nn.Linear(lin_hidden_size, lin_hidden_size) for n in range(5)])
         
         
         #self.fc2 = nn.Linear(hidden_size, hidden_size)  # Second additional linear layer
@@ -34,6 +34,7 @@ class gru(nn.Module):
         _, out = self.gru(x)
         # out = self.dropout(out)
         out = F.silu(self.fc1(out.transpose(0,1).flatten(1,2)))
+        
         for prop in self.prop_h_to_h:
             out = F.silu( prop(out))
         #out = F.leaky_relu(self.fc2(out))  # Only take the output of the last time step
@@ -65,7 +66,7 @@ class gru_pred():
                  dt = 0.1, 
                  seq_length=10,
                  input_size = 1,  # Number of features in each time step of the input sequence
-                 gru_hidden_size = 30,  # Number of units in the hidden state of the GRU layer
+                 gru_hidden_size = 5,  # Number of units in the hidden state of the GRU layer
                  gru_num_layers = 5,  # Number of layers in the GRU layer 
                  dropout_rate = 0.7, # dropout rate   
                  I_max = 5,
@@ -90,7 +91,7 @@ class gru_pred():
         self.model = gru( input_size=input_size, gru_hidden_size=gru_hidden_size,
                          gru_num_layers=gru_num_layers, 
                          output_size=1, 
-                         lin_hidden_size=32, dropout_rate = dropout_rate)
+                         lin_hidden_size=64, dropout_rate = dropout_rate)
         self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=learning_rate)
         self.scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, gamma = decay_rate)
         
@@ -99,7 +100,7 @@ class gru_pred():
         
     def find_normalization(self, batch_size=1_000):
         
-        S, _ = self.env.Randomize_Start(batch_size)
+        S, _, _ = self.env.Randomize_Start(batch_size)
         
         self.a = torch.mean(S)
         self.b = torch.std(S)
@@ -107,16 +108,18 @@ class gru_pred():
         
     def grab_data(self, batch_size):
         
-        S, _ = self.env.Randomize_Start(batch_size)
+        S, _, theta = self.env.Randomize_Start(batch_size)
         x_norm = S #(S - self.a)/self.b
         
-        x, y = self.create_snippets(x_norm)
+        x, y = self.create_snippets(x_norm, theta)
         
         return x, y
     
-    def create_snippets(self, x):
+    def create_snippets(self, x, theta=None):
         
         x_cp = x.T
+        if theta is not None:
+            theta_cp = theta.T
         
         Z = torch.zeros((self.seq_length, 
                          x_cp.shape[0]-self.seq_length-self.n_ahead, 
@@ -129,7 +132,10 @@ class gru_pred():
             Z[:,i,:] = x_cp[i:i+self.seq_length,:]
             # Y[i,:] = x_cp[i+self.seq_length+(self.n_ahead-1),:] \
             #     - x_cp[i+self.seq_length+(self.n_ahead-1)-1,:]
-            Y[i,:] = x_cp[i+self.seq_length+(self.n_ahead-1),:]
+            if theta is None:
+                Y[i,:] = x_cp[i+self.seq_length+(self.n_ahead-1),:]
+            else:
+                Y[i,:] = theta_cp[i+self.seq_length,:]
         
         return Z.transpose(0,1), Y
     
@@ -142,6 +148,7 @@ class gru_pred():
         plt.fill_between(np.arange(len(l)), l-l_err, l+l_err, alpha=0.2)
         plt.plot(np.arange(len(l)), l)
         plt.yscale('log')
+        # plt.ylim(0.03,0.1)
         plt.show()
         
     def moving_average(self, x, n):
@@ -183,14 +190,14 @@ class gru_pred():
             
             outputs = self.model(x)
             
-            loss = torch.sqrt(torch.mean((y - outputs)**2))
+            loss = torch.mean((y - outputs)**2)
             
             # Backward and optimize
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
             
-            self.losses.append(loss.item())
+            self.losses.append(np.sqrt(loss.item()))
             
             if (epoch+1) % 25 ==0:
                 self.scheduler.step()
@@ -207,22 +214,28 @@ class gru_pred():
     
     def pred(self):
         
-        x, y = self.grab_data(1)
+        x = torch.zeros((0,self.seq_length,1))
+        y = torch.zeros((0,1))
+        for i in range(100):
+            _x, _y = self.grab_data(1)
+            
+            x = torch.cat((x,_x),axis=0)
+            y = torch.cat((y,_y),axis=0)
         
         pred = self.model(x).detach()
         
-        plt.scatter(np.arange(y.shape[0]), y.squeeze().numpy(),s=10, label="Y")
-        plt.scatter(np.arange(y.shape[0]), pred.squeeze().numpy(),s=10, label="$E[Y|X]$")
-        plt.legend()
-        plt.xlabel(r"$t$")
-        plt.show()
+        # plt.scatter(np.arange(y.shape[0]), y.squeeze().numpy(),s=10, label="Y")
+        # plt.scatter(np.arange(y.shape[0]), pred.squeeze().numpy(),s=10, label="$E[Y|X]$")
+        # plt.legend()
+        # plt.xlabel(r"$t$")
+        # plt.show()
         
         
-        plt.scatter(x[:,-1,0].numpy(), y.squeeze().numpy(),s=10, label="Y")
-        plt.scatter(x[:,-1,0].numpy(), pred.squeeze().numpy(),s=10, label="$E[Y|X]$")
-        plt.legend()
-        plt.xlabel(r"$S_t$")
-        plt.show()
+        # plt.scatter(x[:,-1,0].numpy(), y.squeeze().numpy(),s=10, label="Y")
+        # plt.scatter(x[:,-1,0].numpy(), pred.squeeze().numpy(),s=10, label="$E[Y|X]$")
+        # plt.legend()
+        # plt.xlabel(r"$S_t$")
+        # plt.show()
         
         # bins = np.linspace(-0.01,0.01,21)
         # plt.hist((y-pred).squeeze().numpy(), bins=bins, alpha=0.5)
@@ -230,16 +243,24 @@ class gru_pred():
         # plt.show()
         
         model_err = (y-pred).squeeze().numpy()
-        print( np.sqrt(np.mean(model_err**2)), np.std(model_err) )
+        print( np.sqrt(np.mean(model_err**2)) )
         
-        naive_err=(y-x[:,-1,0]).squeeze().numpy()
-        print( np.sqrt(np.mean(naive_err**2)), np.std(naive_err) )
+        naive_err=(y-x[:,-1,0].reshape(-1,1)).squeeze().numpy()
+        print( np.sqrt(np.mean(naive_err**2)) )
         
-        S, _ = self.env.Randomize_Start(1)
+        plt.hist(naive_err.squeeze(), bins=np.linspace(-0.25,0.25,21), alpha=0.5)
+        plt.hist(model_err.squeeze(), bins=np.linspace(-0.25,0.25,21),alpha=0.5)
+        plt.show()
         
-        plt.plot(S.numpy().T)
+        x, y = self.grab_data(1)
+        pred = self.model(x).detach().squeeze().numpy()
+        
+        plt.plot(x[:,-1,0], label=r'$S_t$')
+        plt.plot(pred, label=r"$\widehat{\mathbb{E}}[S_{t+n}|\mathcal{F}_t]$")
+        plt.plot(y, label=r'$S_{t+n}$')
+        
         plt.xlabel(r"$t$")
-        plt.ylabel(r"$S_t$")
+        plt.legend()
         plt.show()
         
         

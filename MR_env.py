@@ -44,37 +44,44 @@ class MR_env():
         
         #S = self.S_0 + 3*self.inv_vol*torch.randn(mini_batch_size, self.N)
         #I = self.I_max * (2*torch.rand(mini_batch_size, self.N)-1)
-        S, _ = self.Simulate(self.S_0 + 3*self.inv_vol*torch.randn(mini_batch_size, ),
+        S, _, theta = self.Simulate(self.S_0 + 3*self.inv_vol*torch.randn(mini_batch_size, ),
                              0, mini_batch_size)
         I = self.I_max * (2*torch.rand(mini_batch_size, self.N)-1)
-        return S, I
+        
+        return S, I, theta
 
     def Simulate(self, s0, i0,  mini_batch_size=10):
 
         S = torch.zeros((mini_batch_size, self.N)).float()
         I = torch.zeros((mini_batch_size, self.N)).float()
-
+        theta = torch.zeros((mini_batch_size, self.N)).float()
+        theta[:] = torch.nan
+        
+        theta[:,0] = self.theta[0]
+        
         S[:, 0] = s0#self.S_0
         I[:, 0] = i0
         
-        tau = -np.log(np.random.rand())/0.2
+        tau = np.sort(-np.log(np.random.rand(2))/0.2)
         
         for t in (range(self.N-1)):
             
-            if self.t[t] < tau:
-                self.theta = 1
+            if self.t[t] < tau[0]:
+                theta[:,t] = self.theta[0]
+            elif self.t[t] < tau[1]:
+                theta[:,t] = self.theta[1]
             else:
-                self.theta = 1.25
+                theta[:,t] = self.theta[2]
 
-            S[:, t+1], I[:,t+1], _ = self.step(t*self.dt, S[:,t], I[:,t], 0*I[:,t])
+            S[:, t+1], I[:,t+1], _ = self.step(t*self.dt, S[:,t], I[:,t], 0*I[:,t], theta[:,t])
 
-        return S, I
+        return S, I, theta
     
-    def step(self, t, S, I, I_p):
+    def step(self, t, S, I, I_p, theta):
         
         mini_batch_size = S.shape[0]
         
-        S_p = self.theta + (S-self.theta)*np.exp(-self.kappa*self.dt) \
+        S_p = theta + (S-theta)*np.exp(-self.kappa*self.dt) \
             + self.eff_vol *  torch.randn(S.shape)
 
         q = I_p-I
