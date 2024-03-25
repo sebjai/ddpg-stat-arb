@@ -13,6 +13,7 @@ from MR_env import MR_env
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 import pdb
+from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
 
 class gru(nn.Module):
     def __init__(self, input_size, gru_hidden_size, gru_num_layers, output_size, 
@@ -26,29 +27,29 @@ class gru(nn.Module):
         
         self.prop_h_to_h = nn.ModuleList([nn.Linear(lin_hidden_size, lin_hidden_size) for n in range(5)])
         
-        
-        #self.fc2 = nn.Linear(hidden_size, hidden_size)  # Second additional linear layer
         self.fc3 = nn.Linear(lin_hidden_size, output_size)  # Output linear layer
 
     def forward(self, x):
         _, out = self.gru(x)
-        # out = self.dropout(out)
+
         out = F.silu(self.fc1(out.transpose(0,1).flatten(1,2)))
         
         for prop in self.prop_h_to_h:
             out = F.silu( prop(out))
-        #out = F.leaky_relu(self.fc2(out))  # Only take the output of the last time step
-        out = F.softmax(self.fc3(out))
+
+        out = self.fc3(out)#F.softmax(, dim=1)
         
         return out
     
 class early_stopping:
+
     def __init__(self, patience=5):
         self.patience = patience
         self.counter = 0
         self.best_loss = float('inf')
 
     def __call__(self, loss):
+
         if loss < self.best_loss:
             self.best_loss = loss
             self.counter = 0
@@ -75,7 +76,7 @@ class gru_pred():
                  seed = 10002197,
                  kappa=1,
                  sigma=0.1,
-                 theta=[0.9,1,1.1]):
+                 theta=[0.9, 1, 1.1]):
 
         np.random.seed(seed)  
         torch.manual_seed(seed)
@@ -140,6 +141,40 @@ class gru_pred():
         
         return Z.transpose(0,1), Y
     
+    def handle_y(self, y):
+            
+        y_i = torch.zeros(y.shape[0], 3)
+    
+        for i in range(y.shape[0]):
+    
+            if y[i] == self.env.theta[0]:
+    
+                y_i[i,0] = 1
+    
+            elif y[i] == self.env.theta[1]:
+    
+                y_i[i,1] = 1
+    
+            elif y[i] == self.env.theta[2]:
+    
+                y_i[i,2] = 1
+                
+        return y_i
+
+    def calc_accuracy(self, y, y_pred):
+
+        y_i = self.handle_y(y)
+
+        predicted_labels = torch.argmax(y_pred, dim=1)
+
+        predictions = torch.zeros(len(self.env.theta)).repeat(y.shape[0], 1)
+
+        for i in range(len(self.env.theta)):
+        
+            predictions[:, i] = (predicted_labels == y_i[:, i])
+
+        return accuracy_score(y_i, predictions.numpy()) #classification_report(y_i, correct_predictions.numpy(), zero_division = 0.0)
+    
     def plot_losses(self):
         
         losses = np.array(self.losses)
@@ -181,21 +216,23 @@ class gru_pred():
                 
         return y, y_err        
         
-        
+    
     def train(self, num_epochs=10_000, n_print=100):
-        
+
         for epoch in tqdm(range(num_epochs)):
             
             # Forward pass
             x, y = self.grab_data(1)
-            
+
             outputs = self.model(x)
-            
-            loss = 0 
-            
-            for k in range(len(self.env.theta)):
-                mask = (y == self.env.theta[k]).squeeze()
-                loss += -torch.sum(torch.log( outputs[mask,k]))
+            ell = nn.CrossEntropyLoss()
+            loss =  ell(outputs, self.handle_y(y))
+
+            #loss = 0
+#
+            #for k in range(len(self.env.theta)):
+            #    mask = (y == self.env.theta[k]).squeeze()
+            #    loss += -torch.sum(torch.log(outputs[mask,k]))
             
             # Backward and optimize
             self.optimizer.zero_grad()
@@ -208,20 +245,21 @@ class gru_pred():
                 self.scheduler.step()
     
             if epoch == 0 or (epoch+1) % n_print == 0:
-                print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item():.4f}')
+                print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item():.4f}')          
+                
+                accuracy = self.calc_accuracy(y, outputs)
+                #print('Accuracy',accuracy)
+
                 self.pred()
                 self.plot_losses()
                 
-            # if epoch > 100:
-            #     if early_stopping(loss.item()):
-            #         print("stopping early")
-            #         break   
-    
     def pred(self):
         
         x, y = self.grab_data(1)
-        pred = self.model(x).detach().squeeze().numpy()
-        
+        lg = nn.Softmax(dim=1)
+        pre = self.model(x).detach().squeeze()#.numpy()
+        #logsoftmax = nn.LogSoftmax(dim=1)
+        pred = lg( pre).numpy()
         fig  = plt.figure()
         ax = fig.add_subplot(111)
         ax2 = ax.twinx()
@@ -230,11 +268,12 @@ class gru_pred():
         for k in range(len(self.env.theta)):
             ax2.plot(pred[:,k], label=r"$\widehat{\mathbb{P}}[\theta_{t+n} = \theta^{(" + str(k) + ")}|\mathcal{F}_t]$")
             
-        ax.plot(y, label=r'$\theta_{t+n}$', color='tab:red')
+        ax.plot(y, label=r'$\theta_{t}$', color='tab:red')#+n
         
         plt.xlabel(r"$t$")
-        ax.legend(loc='upper right')
-        ax2.legend(loc='upper left')
+        ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1))
+        ax2.legend(loc='upper left', bbox_to_anchor=(-0.43, 1))
+        fig.text(0.5, 0.01, r'The possible levels for $\theta$ are: \theta^{(0)}$ = 0.9, $\theta^{(1)}$ = 1, $\theta^{(2)}$ = 1.1 ', ha='center')
         plt.show()
         
         
