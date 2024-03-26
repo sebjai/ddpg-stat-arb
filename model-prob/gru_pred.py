@@ -256,6 +256,8 @@ class gru_pred():
     def pred(self):
         
         x, y = self.grab_data(1)
+        t = self.env.t[:-self.n_ahead-self.seq_length]
+        
         lg = nn.Softmax(dim=1)
         pre = self.model(x).detach().squeeze()#.numpy()
         #logsoftmax = nn.LogSoftmax(dim=1)
@@ -264,16 +266,16 @@ class gru_pred():
         ax = fig.add_subplot(111)
         ax2 = ax.twinx()
         
-        ax.plot(x[:,-1,0], label=r'$S_t$', color='k')
+        ax.plot(t, x[:,-1,0], label=r'$S_t$', color='k')
         for k in range(len(self.env.theta)):
-            ax2.plot(pred[:,k], label=r"$\widehat{\mathbb{P}}[\theta_{t+n} = \theta^{(" + str(k) + ")}|\mathcal{F}_t]$")
+            ax2.plot(t, pred[:,k], label=r"$\widehat{\mathbb{P}}[\theta_{t+n} = \theta^{(" + str(k) + ")}|\mathcal{F}_t]$")
             
-        ax.plot(y, label=r'$\theta_{t}$', color='tab:red')#+n
+        ax.plot(t, y, label=r'$\theta_{t}$', color='tab:red')#+n
         
         plt.xlabel(r"$t$")
         ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1))
         ax2.legend(loc='upper left', bbox_to_anchor=(-0.43, 1))
-        fig.text(0.5, 0.01, r'The possible levels for $\theta$ are: \theta^{(0)}$ = 0.9, $\theta^{(1)}$ = 1, $\theta^{(2)}$ = 1.1 ', ha='center')
+        fig.text(0.5, 0.01, r'The possible levels for $\theta$ are: $\theta^{(0)}$ = 0.9, $\theta^{(1)}$ = 1, $\theta^{(2)}$ = 1.1 ', ha='center')
         plt.show()
         
         
