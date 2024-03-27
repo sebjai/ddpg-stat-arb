@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 import pdb
 from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
+import dill
 
 class gru(nn.Module):
     def __init__(self, input_size, gru_hidden_size, gru_num_layers, output_size, 
@@ -97,8 +98,7 @@ class gru_pred():
         self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=learning_rate)
         self.scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, gamma = decay_rate)
         
-        self.losses = []
-        
+        self.losses = []      
         
     def find_normalization(self, batch_size=1_000):
         
@@ -106,7 +106,6 @@ class gru_pred():
         
         self.a = torch.mean(S)
         self.b = torch.std(S)
-        
         
     def grab_data(self, batch_size):
         
@@ -216,7 +215,6 @@ class gru_pred():
                 
         return y, y_err        
         
-    
     def train(self, num_epochs=10_000, n_print=100):
 
         for epoch in tqdm(range(num_epochs)):
@@ -252,6 +250,7 @@ class gru_pred():
 
                 self.pred()
                 self.plot_losses()
+        #dill.dump(self.model, open('pred_model.pk','wb'))
                 
     def pred(self):
         
