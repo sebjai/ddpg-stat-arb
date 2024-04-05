@@ -52,14 +52,18 @@ class MR_env():
         
         return S, I, theta
 
-    def Simulate(self, s0, i0, model = 'exp', batch_size=10, ret_reward = False, I_p = 0):
-
-        S = torch.zeros((batch_size, self.N)).float()
-        I = torch.zeros((batch_size, self.N)).float()
-        I_p = torch.zeros((self.N)).float()
-        theta = torch.zeros((batch_size, self.N)).float()
-        r = torch.zeros((batch_size, self.N)).float()
-        Z = torch.zeros((batch_size, self.N)).int()
+    def Simulate(self, s0, i0, model = 'exp', batch_size=10, ret_reward = False, I_p = 0, N = None):
+        if N is None:
+            N = self.N
+        else :
+            N = N
+            
+        S = torch.zeros((batch_size, N)).float()
+        I = torch.zeros((batch_size, N)).float()
+        I_p = torch.zeros(N).float()
+        theta = torch.zeros((batch_size, N)).float()
+        r = torch.zeros((batch_size, N)).float()
+        Z = torch.zeros((batch_size, N)).int()
         theta[:] = torch.nan
         
         theta[:,0] = self.theta[0]
@@ -71,7 +75,7 @@ class MR_env():
         if model == 'exp':
             tau = np.sort(-np.log(np.random.rand(2))/0.2)
 
-            for t in (range(self.N-1)):
+            for t in (range(N-1)):
 
                 if self.t[t] < tau[0]:
 
@@ -119,7 +123,7 @@ class MR_env():
             Z[:,0] = torch.tensor(np.random.choice(np.arange(len(labels)), batch_size)).int()
             theta[:,0] = states[Z[:,0]] 
 
-            for t in range(self.N-1):
+            for t in range(N-1):
                 
                 # step in the environment
                 S[:, t+1], I[:,t+1], _ = self.step(t*self.dt, S[:,t], I[:,t], I[:, t+1], theta[:,t], batch_size = batch_size)

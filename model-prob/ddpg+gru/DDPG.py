@@ -221,7 +221,7 @@ class DDPG():
         self.gru.model.load_state_dict(torch.load('model.pth'))
 
         lg = nn.Softmax(dim=1)
-        x =  self.create_snippets(S)#np.apply_along_axis(self.create_snippets, axis=1, arr=S.numpy())#torch.cat([self.create_snippets(S[i, :].unsqueeze(0)) for i in range(S.shape[0])], dim = 0 )#[0]
+        x =  self.create_snippets(S) #np.apply_along_axis(self.create_snippets, axis=1, arr=S.numpy())#torch.cat([self.create_snippets(S[i, :].unsqueeze(0)) for i in range(S.shape[0])], dim = 0 )#[0]
         probs = torch.zeros(S. shape[0], x.shape[0], 3)
         estimated_theta = torch.zeros(S.shape[0], x.shape[0])
 
@@ -310,7 +310,7 @@ class DDPG():
               mini_batch_size=256, 
               n_plot=100):
         
-        #self.run_strategy(1_000, name= datetime.now().strftime("%H_%M_%S"))
+        self.run_strategy(1_000, name= datetime.now().strftime("%H_%M_%S"), N = 30)
 
         C = 100
         D = 100
@@ -345,7 +345,7 @@ class DDPG():
             if np.mod(i+1,n_plot) == 0:
                 
                 self.loss_plots()
-                self.run_strategy(1_00, name= datetime.now().strftime("%H_%M_%S"), N = 20)#100
+                self.run_strategy(1_000, name= datetime.now().strftime("%H_%M_%S"), N = 30)#100
                 #self.plot_policy()
                 
     def moving_average(self, x, n):
@@ -394,30 +394,30 @@ class DDPG():
         if N is None:
             N = self.env.N
         
-        S = torch.zeros((nsims, N+1)).float()
-        I  = torch.zeros((nsims, N+1)).float()
-        I_p = torch.zeros((nsims, N+1)).float()
-        r = torch.zeros((nsims, N - self.gru.seq_length)).float()
-        theta_true = torch.zeros((nsims, N+1)).float()
+        S          = torch.zeros((nsims, N +1)).float()
+        I          = torch.zeros((nsims, N +1)).float()
+        I_p        = torch.zeros((nsims, N +1)).float()
+        r          = torch.zeros((nsims, N - self.gru.seq_length + self.gru.n_ahead)).float()
+        #theta_true = torch.zeros((nsims, N +1)).float()
 
         S0 = self.env.S_0
         I0 = 0
 
         S[:,0] = S0
         I[:,0] = 0
-        theta_true[:,0] = 1.1*torch.ones(nsims)
+        #theta_true[:,0] = 1.1*torch.ones(nsims)
         
         ones = torch.ones(nsims)
 
-        _, _, theta_true, _ = self.env.Simulate(S0*ones, I0*ones, model='MC', batch_size=nsims, ret_reward=True, I_p=0)
+        _, _, theta_true, _ = self.env.Simulate(S0*ones, I0*ones, model='MC', batch_size=nsims, ret_reward=True, I_p=0, N = N)
         #S, I, theta
-        theta_true = theta_true[:, :self.gru.seq_length]
+        theta_true = theta_true[:, :N - self.gru.seq_length + self.gru.n_ahead]
         theta_estim = self.get_theta(S)
-        S = S[:, :self.gru.seq_length + self.gru.n_ahead]
-        I = I[:, :self.gru.seq_length + self.gru.n_ahead]
+        S = S[:, :N - self.gru.seq_length + self.gru.n_ahead]
+        I = I[:, :N - self.gru.seq_length + self.gru.n_ahead]
 
 
-        for t in range(self.gru.seq_length + self.gru.n_ahead - 1):
+        for t in range(N - self.gru.seq_length + self.gru.n_ahead - 1):
 
             #theta_true[:, t+1] = self.fetch_theta(t, batch_size=nsims, model='MC')
 #
@@ -456,7 +456,7 @@ class DDPG():
             
         plot(t, (S-S[:,0].reshape(S.shape[0],-1)), 1, r"$S_t-S_0$" ) #
         plot(t, I, 2, r"$I_t$")
-        plot(t[:-1], np.cumsum(r[:-1], axis=1), 3, r"$r_t$")
+        plot(t, np.cumsum(r[:-1], axis=1), 3, r"$r_t$")
 
         plt.subplot(2,2, 4)
         plt.hist(np.sum(r,axis=1), bins=51)

@@ -11,7 +11,7 @@ import os
 os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
 
 env = MR_env(S_0 = 1, kappa = 5, sigma = 0.1, theta = [0.9, 1, 1.1 ],
-             dt = 0.1, T = 21, 
+             dt = 0.1, T = 20, 
              I_max = 10, lambd = 0.05)
 
 gru = gru_pred(T = env.T, dt = env.dt, learning_rate = 0.001,
@@ -23,5 +23,5 @@ ddpg = DDPG(env, gru = gru, I_max = 10,
             lr=1e-3,
             name="test" )
    
-ddpg.train(n_iter=10_000, n_plot=200, n_iter_Q=1, n_iter_pi=1, mini_batch_size=16)
+ddpg.train(n_iter=10_000, n_plot=100, n_iter_Q=10, n_iter_pi=10, mini_batch_size=1)
 # %%
