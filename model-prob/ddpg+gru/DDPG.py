@@ -22,6 +22,8 @@ import copy
 from datetime import datetime
 
 import scipy.linalg as linalg 
+import random
+torch.autograd.set_detect_anomaly(True)
 
 class ANN(nn.Module):
 
@@ -100,7 +102,7 @@ class DDPG():
         
         # policy approximation
         #
-        # features = S, I, theta_estim
+        # features = S, I, theta_estim_1, theta_estim_2, theta_estim_3
         #
         self.pi = {'net': ANN(n_in=3, 
                               n_out=1, 
@@ -113,7 +115,7 @@ class DDPG():
         
         # Q - function approximation
         #
-        # features = S, I, a=Ip, theta_estim
+        # features = S, I, a=Ip, theta_estim_1, theta_estim_2, theta_estim_3
         #
         self.Q_main = {'net' : ANN(n_in=4, 
                                   n_out=1,
@@ -137,17 +139,51 @@ class DDPG():
         
     def __stack_state__(self, S, I, theta_estim):
 
-        return torch.cat((S.unsqueeze(-1)/self.env.S_0-1.0,
-                          I.unsqueeze(-1)/self.I_max,
-                          theta_estim.unsqueeze(-1)/1.0 - 1.0
-                          ), axis=-1)
+        return torch.cat((S/self.env.S_0-1.0,#.unsqueeze(-1)
+                          I/self.I_max,#.unsqueeze(-1)
+                          theta_estim.unsqueeze(-1)#/1.0 - 1.0
+                          ), axis=1)
     
     def __grab_mini_batch__(self, mod_type = 'MC', mini_batch_size = 256):
         
         t = torch.rand((mini_batch_size))*self.env.N
         S, I, theta_true = self.env.Randomize_Start(type_mod = mod_type, batch_size = mini_batch_size)
-        
+        # da qui escono già come snippets
+
         return t, S, I, theta_true
+    
+    def make_reward(self, batch_S, batch_S_p, batch_I, I_p):
+
+        q = I_p-batch_I
+
+        r = I_p*(batch_S_p-batch_S) - self.env.lambd*torch.abs(q)
+
+        return r
+
+    def sample_batch(self, original_tensor, mini_batch_size = 1):
+
+        sample_size = mini_batch_size
+
+        # Sample a random index
+        num_samples = original_tensor.shape[0] - sample_size + 1
+        start_index = torch.randint(0, num_samples, (1,), dtype=torch.long).item()
+
+        # Extract the sample using the sampled index
+        sample = original_tensor[start_index:start_index+sample_size]
+
+        return sample
+    
+    def grab_data(self, S, I, mini_batch_size = 256):
+
+        es          = self.sample_batch(S, 1)
+
+        theta_estim   = self.get_theta(es[:,  :-2]).detach() 
+        theta_estim_p = self.get_theta(es[:, 1:-1]).detach()
+        batch_S       = self.create_snippets(es[:,   :-2])
+        batch_S_p     = self.create_snippets(es[:,  1:-1])
+        batch_I       = self.create_snippets(self.sample_batch(I, 1)[:,   :-2])
+        
+        return theta_estim , theta_estim_p ,  batch_S ,  batch_S_p ,  batch_I       
     
     def create_snippets(self, x, theta=None):
         
@@ -218,83 +254,99 @@ class DDPG():
 
     def get_theta(self, S):
 
-        self.gru.model.load_state_dict(torch.load('model.pth'))
+        self.gru.model.load_state_dict(torch.load('model.pth')) # do it once
 
         lg = nn.Softmax(dim=1)
-        x =  self.create_snippets(S) #np.apply_along_axis(self.create_snippets, axis=1, arr=S.numpy())#torch.cat([self.create_snippets(S[i, :].unsqueeze(0)) for i in range(S.shape[0])], dim = 0 )#[0]
-        probs = torch.zeros(S. shape[0], x.shape[0], 3)
-        estimated_theta = torch.zeros(S.shape[0], x.shape[0])
-
-        for i in range(x.shape[2]):
-            probs[i, :, :] = lg(self.gru.model(x[:,:,i].unsqueeze(2)))
-            _, idx = torch.max(probs, dim = 2)  # Extract predicted class index
-
-            predicted_classes = idx.tolist()  # Extract predicted class index
-            class_mapping = {0: 0.9, 1: 1, 2: 1.1}  # Define mapping
-
-            predicted_class_values = [class_mapping[pred] for pred in predicted_classes[i]]
-
-            estimated_theta[i, :] = torch.tensor(predicted_class_values)
+        x =  self.create_snippets(S) # create the snippets for the whole bank of paths
         
-        return estimated_theta
+        estimated_theta = lg(self.gru.model(x))#x.unsqueeze(-1)
+        #np.apply_along_axis(self.create_snippets, axis=1, arr=S.numpy()) 
+        #torch.cat([self.create_snippets(S[i, :].unsqueeze(0)) for i in range(S.shape[0])], dim = 0 )#[0]
+        
+        
+        
+        #probs = torch.zeros(S. shape[0], x.shape[0], 3)
+        #estimated_theta = torch.zeros(S.shape[0], x.shape[0])
+#
+        #for i in range(x.shape[2]):
+#
+        #    probs[i, :, :] = lg(self.gru.model(x[:,:,i].unsqueeze(2))) #x.unsqueez(-1) - > pass to self.gru.model outside the loop
+#
+#
+        #    _, idx = torch.max(probs, dim = 2)  # Extract predicted class index
+#
+        #    predicted_classes = idx.tolist()  # Extract predicted class index
+        #    class_mapping = {0: 0.9, 1: 1, 2: 1.1}  # Define mapping
+#
+        #    predicted_class_values = [class_mapping[pred] for pred in predicted_classes[i]]
+#
+        #    estimated_theta[i, :] = torch.tensor(predicted_class_values)
+        
+        return estimated_theta # use the posterior probability instead of the values
 
-    def Update_Q(self, S, I,  batch_theta_true, theta_estim, n_iter = 10, mini_batch_size=256, epsilon=0.02):
-
-        N = S.shape[1]
-
-        for i in range(n_iter):	
+    def Update_Q(self, 
+                 batch_S, batch_S_p, batch_I, theta_estim_p, theta_estim, 
+                  n_iter = 10, mini_batch_size=256, epsilon=0.02):
+        
+        #theta_estim , theta_estim_p ,  batch_S ,  batch_S_p ,  batch_I  = self.grab_data(mini_batch_size = mini_batch_size)     
             
+        
+        for i in range(n_iter):	
+
+
             self.Q_main['optimizer'].zero_grad()
 
             # concatenate states
-            X = self.__stack_state__(S, I, theta_estim)
+            X = self.__stack_state__(batch_S[:, -1],
+                                     batch_I[:, -1], 
+                                     theta_estim[:, -1])
 
-            I_p = self.pi['net'](X).detach().reshape(-1, N) * torch.exp(-0.5*epsilon**2+epsilon*torch.randn((mini_batch_size, N)))
-            
-            Q = self.Q_main['net']( torch.cat((X, I_p.reshape(-1, N, 1)/self.I_max),axis=2) )
+            I_p = self.pi['net'](X).reshape(-1, self.env.N - self.gru.n_ahead - self.gru.seq_length - 2).detach() * torch.exp(-0.5*epsilon**2+epsilon*torch.randn((mini_batch_size, X.shape[0])))
+
+            Q = self.Q_main['net']( torch.cat((X.reshape(-1, self.env.N - self.gru.n_ahead - self.gru.seq_length - 2), I_p/self.I_max),axis=0).transpose(0,1) )#.reshape(-1, N, 1)
                 
             # step in the environment
-            S_p, I_p, r = self.env.step(0, S, I, I_p, batch_theta_true) # step
+            r = self.make_reward(batch_S[:, -1], batch_S_p[:, -1], batch_I[:, -1], I_p.reshape(-1,1))#S_p, I_p, r = self.env.step(0, S, I, I_p, batch_theta_true) # step
             
-            theta_estim_p = self.get_theta(S_p) ### -> NON METTO LA STIMA PER 10 STEP PRIMA ED UNO DOPO PERCHE' SENNO QUI HO UN GAP DI 10 STEP
-
             # compute the Q(S', a*)
-            X_p = self.__stack_state__(S_p, I_p, theta_estim)
+            X_p = self.__stack_state__(batch_S_p[:, -1], I_p.reshape(-1,1), theta_estim_p[:, -1])   #S_p, I_p, theta_estim_p) #################################
 
             # optimal policy at t+1
             I_pp = self.pi['net'](X_p).detach()
             
             # compute the target for Q
-            target = r.reshape(-1, N, 1) + self.gamma * self.Q_target['net'](torch.cat((X_p, I_pp.reshape(-1, N, 1)/self.I_max),axis=2))
+            target = r + self.gamma * self.Q_target['net'](torch.cat((X_p, I_pp/self.I_max), axis=1))
             
             loss = torch.mean((target.detach() - Q)**2)
             
             # compute the gradients
-            loss.backward()
+            loss.backward(retain_graph=True)
 
             # perform step using those gradients
             self.Q_main['optimizer'].step()                
             self.Q_main['scheduler'].step() 
             
             self.Q_loss.append(loss.item())
-            
+
         self.Q_target = copy.deepcopy(self.Q_main)
         
-    def Update_pi(self, S, I,  theta_estim, n_iter = 10, mini_batch_size=256, epsilon=0.02):
-                    
-        N = S.shape[1]
-
+    def Update_pi(self, 
+                  batch_S, batch_I,  theta_estim, 
+                  n_iter = 10, mini_batch_size=256, epsilon=0.02):
+            
+        #theta_estim , theta_estim_p ,  batch_S ,  batch_S_p ,  batch_I  = self.grab_data(mini_batch_size = mini_batch_size)
+           
         for i in range(n_iter):
         
             self.pi['optimizer'].zero_grad()
 
             # concatenate states 
-            X = self.__stack_state__(S, I, theta_estim)
+            X = self.__stack_state__(batch_S[:, -1], batch_I[:, -1], theta_estim[:, -1])
 
             I_p = self.pi['net'](X)
             
-            Q = self.Q_main['net']( torch.cat((X, I_p.reshape(-1, N, 1)/self.I_max),axis=2) )
-            
+            Q = self.Q_main['net']( torch.cat((X.reshape(-1, self.env.N - self.gru.n_ahead - self.gru.seq_length - 2).transpose(0,1), I_p/self.I_max),axis=1) )#.reshape(-1, N, 1)
+                            
             loss = -torch.mean(Q)
                 
             loss.backward()
@@ -310,7 +362,7 @@ class DDPG():
               mini_batch_size=256, 
               n_plot=100):
         
-        self.run_strategy(1_000, name= datetime.now().strftime("%H_%M_%S"), N = 30)
+        #self.run_strategy(1_000, name= datetime.now().strftime("%H_%M_%S"), N = 30)
 
         C = 100
         D = 100
@@ -318,34 +370,30 @@ class DDPG():
         if len(self.epsilon)==0:
             self.count=0
             
-        _, S, I, theta_true = self.__grab_mini_batch__(mini_batch_size = mini_batch_size + n_iter)
+        _, S, I, theta_true = self.__grab_mini_batch__(mini_batch_size = 10_000 )
 
-        for i in tqdm(range(n_iter)):
+        for i in tqdm(range(n_iter)): # randomly select the rows of S 
+
+            theta_estim , theta_estim_p ,  batch_S ,  batch_S_p ,  batch_I = self.grab_data(S, I)
 
             epsilon = np.maximum(C/(D+self.count), 0.02)
             self.epsilon.append(epsilon)
             self.count += 1
 
-            batch_S = S[i:i+mini_batch_size, :]
-
-            theta_estim = self.get_theta(batch_S)
-
-            batch_S = batch_S [:, self.gru.seq_length + self.gru.n_ahead:]
-            batch_I = I [i:i+mini_batch_size, self.gru.seq_length + self.gru.n_ahead:]
-            batch_theta_true = theta_true [i:i+mini_batch_size, self.gru.seq_length + self.gru.n_ahead: ]
-
-            self.Update_Q(batch_S, batch_I, batch_theta_true, theta_estim, n_iter=n_iter_Q, 
+            self.Update_Q(batch_S, batch_S_p, batch_I, theta_estim_p, theta_estim, 
+                          n_iter=n_iter_Q, 
                           mini_batch_size=mini_batch_size, 
                           epsilon=epsilon)
             
-            self.Update_pi(batch_S, batch_I,  theta_estim, n_iter=n_iter_pi, 
+            self.Update_pi(batch_S, batch_I,  theta_estim, 
+                           n_iter=n_iter_pi, 
                            mini_batch_size=mini_batch_size, 
                            epsilon=epsilon)
 
             if np.mod(i+1,n_plot) == 0:
                 
                 self.loss_plots()
-                self.run_strategy(1_000, name= datetime.now().strftime("%H_%M_%S"), N = 30)#100
+                self.run_strategy(1_0, name= datetime.now().strftime("%H_%M_%S"), N = 30)#100
                 #self.plot_policy()
                 
     def moving_average(self, x, n):
@@ -423,7 +471,6 @@ class DDPG():
 #
             #theta_estim = self.get_theta(S)
 #
-            #qui posso chiamare un metodo per fare il theta come voglio io e passarlo a step
             X = self.__stack_state__(S[:,t], I[:,t], theta_estim[:, t])
             
             I_p[:,t] = self.pi['net'](X).reshape(-1)

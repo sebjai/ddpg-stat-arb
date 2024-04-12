@@ -77,7 +77,7 @@ class gru_pred():
                  seed = 10002197,
                  kappa=1,
                  sigma=0.1,
-                 theta=[0.9, 1, 1.1]):
+                 theta=[0.9, 1, 1.1]): # torch.tensor([0.8000, 1.0000, 1.2000])
 
         np.random.seed(seed)  
         torch.manual_seed(seed)
@@ -252,6 +252,18 @@ class gru_pred():
                 self.plot_losses()
         #dill.dump(self.model, open('pred_model.pk','wb'))
                 
+                
+                
+                # benchmark con metodi più semplici specialmente in regimi con molto rumore
+                # mettere più rumore sigma più grande della distanza fra i regimi
+                # confrontare con la media mobile come naive 
+                # confrontare con hidden markov model semplice
+                # soluzione analitica? libro di ecnometria ar 1 regime switching    
+                # markov switching autoregressive model - tsay
+                # hamilton capitolo 22 - 1994
+                # bayesian online learning con yvonni -> numero non finito di regimi -> modello classico di machine learning con dati iid e adattato al caso ar 1 
+                # markoviano di ordine arbitrario
+
     def pred(self):
         
         x, y = self.grab_data(1)
