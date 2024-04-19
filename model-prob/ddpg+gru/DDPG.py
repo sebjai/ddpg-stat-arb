@@ -97,6 +97,7 @@ class DDPG():
         self.Q_loss = []
         self.pi_loss = []
         self.gru = gru
+        self.gru.model.load_state_dict(torch.load('model.pth')) # load the model
 
     def __initialize_NNs__(self):
         
@@ -104,7 +105,7 @@ class DDPG():
         #
         # features = S, I, theta_estim_1, theta_estim_2, theta_estim_3
         #
-        self.pi = {'net': ANN(n_in=3, 
+        self.pi = {'net': ANN(n_in=5, 
                               n_out=1, 
                               nNodes=self.n_nodes, 
                               nLayers=self.n_layers,
@@ -117,7 +118,7 @@ class DDPG():
         #
         # features = S, I, a=Ip, theta_estim_1, theta_estim_2, theta_estim_3
         #
-        self.Q_main = {'net' : ANN(n_in=4, 
+        self.Q_main = {'net' : ANN(n_in=6, 
                                   n_out=1,
                                   nNodes=self.n_nodes, 
                                   nLayers=self.n_layers) }
@@ -141,7 +142,7 @@ class DDPG():
 
         return torch.cat((S/self.env.S_0-1.0,#.unsqueeze(-1)
                           I/self.I_max,#.unsqueeze(-1)
-                          theta_estim.unsqueeze(-1)#/1.0 - 1.0
+                          theta_estim#.unsqueeze(-1)#/1.0 - 1.0
                           ), axis=1)
     
     def __grab_mini_batch__(self, mod_type = 'MC', mini_batch_size = 256):
@@ -161,6 +162,9 @@ class DDPG():
         return r
 
     def sample_batch(self, original_tensor, mini_batch_size = 1):
+        '''
+        Samples a mini-batch of size mini_batch_size from the original_tensor.
+        '''
 
         sample_size = mini_batch_size
 
@@ -174,14 +178,18 @@ class DDPG():
         return sample
     
     def grab_data(self, S, I, mini_batch_size = 256):
+        #theta_estim    = torch.zeros(mini_batch_size * self.env.N - self.gru.seq_length - self.gru.n_ahead, 3)
+        #theta_estim_p  = torch.zeros(mini_batch_size * self.env.N - self.gru.seq_length - self.gru.n_ahead, 3)
+        es          = self.sample_batch(S, mini_batch_size)
+        #for i in range(es.shape[0]):
+            #es[i, -2] = self.fetch_theta(int(es[i, -1]), model='MC')
+        #self.get_theta(es[i,  :-2].reshape(1, -1)).detach() for i in range(es.shape[0])
 
-        es          = self.sample_batch(S, 1)
-
-        theta_estim   = self.get_theta(es[:,  :-2]).detach() 
-        theta_estim_p = self.get_theta(es[:, 1:-1]).detach()
+        theta_estim   = self.get_theta(es[:,  :-2].reshape(1, -1)).detach() 
+        theta_estim_p = self.get_theta(es[:, 1:-1].reshape(1, -1)).detach()
         batch_S       = self.create_snippets(es[:,   :-2])
         batch_S_p     = self.create_snippets(es[:,  1:-1])
-        batch_I       = self.create_snippets(self.sample_batch(I, 1)[:,   :-2])
+        batch_I       = self.create_snippets(self.sample_batch(I, mini_batch_size)[:,   :-2])
         
         return theta_estim , theta_estim_p ,  batch_S ,  batch_S_p ,  batch_I       
     
@@ -254,52 +262,55 @@ class DDPG():
 
     def get_theta(self, S):
 
-        self.gru.model.load_state_dict(torch.load('model.pth')) # do it once
+        # do it once
 
         lg = nn.Softmax(dim=1)
         x =  self.create_snippets(S) # create the snippets for the whole bank of paths
         
-        estimated_theta = lg(self.gru.model(x))#x.unsqueeze(-1)
+        estimated_theta = lg(self.gru.model(x))
+        
+        return estimated_theta
+    
+        #x.unsqueeze(-1)
         #np.apply_along_axis(self.create_snippets, axis=1, arr=S.numpy()) 
         #torch.cat([self.create_snippets(S[i, :].unsqueeze(0)) for i in range(S.shape[0])], dim = 0 )#[0]
         
         
         
-        #probs = torch.zeros(S. shape[0], x.shape[0], 3)
-        #estimated_theta = torch.zeros(S.shape[0], x.shape[0])
+    #probs = torch.zeros(S. shape[0], x.shape[0], 3)
+    #estimated_theta = torch.zeros(S.shape[0], x.shape[0])
 #
-        #for i in range(x.shape[2]):
+    #for i in range(x.shape[2]):
 #
-        #    probs[i, :, :] = lg(self.gru.model(x[:,:,i].unsqueeze(2))) #x.unsqueez(-1) - > pass to self.gru.model outside the loop
+    #    probs[i, :, :] = lg(self.gru.model(x[:,:,i].unsqueeze(2))) #x.unsqueez(-1) - > pass to self.gru.model outside the loop
 #
 #
-        #    _, idx = torch.max(probs, dim = 2)  # Extract predicted class index
+    #    _, idx = torch.max(probs, dim = 2)  # Extract predicted class index
 #
-        #    predicted_classes = idx.tolist()  # Extract predicted class index
-        #    class_mapping = {0: 0.9, 1: 1, 2: 1.1}  # Define mapping
+    #    predicted_classes = idx.tolist()  # Extract predicted class index
+    #    class_mapping = {0: 0.9, 1: 1, 2: 1.1}  # Define mapping
 #
-        #    predicted_class_values = [class_mapping[pred] for pred in predicted_classes[i]]
+    #    predicted_class_values = [class_mapping[pred] for pred in predicted_classes[i]]
 #
-        #    estimated_theta[i, :] = torch.tensor(predicted_class_values)
-        
-        return estimated_theta # use the posterior probability instead of the values
+    #    estimated_theta[i, :] = torch.tensor(predicted_class_values)
+    
+     # use the posterior probability instead of the values
 
     def Update_Q(self, 
                  batch_S, batch_S_p, batch_I, theta_estim_p, theta_estim, 
                   n_iter = 10, mini_batch_size=256, epsilon=0.02):
         
-        #theta_estim , theta_estim_p ,  batch_S ,  batch_S_p ,  batch_I  = self.grab_data(mini_batch_size = mini_batch_size)     
-            
+        #theta_estim , theta_estim_p ,  batch_S ,  batch_S_p ,  batch_I  = self.grab_data(mini_batch_size = mini_batch_size)       
         
         for i in range(n_iter):	
 
-
+            
             self.Q_main['optimizer'].zero_grad()
 
             # concatenate states
             X = self.__stack_state__(batch_S[:, -1],
                                      batch_I[:, -1], 
-                                     theta_estim[:, -1])
+                                     theta_estim) #the last one is the one we predict with theta
 
             I_p = self.pi['net'](X).reshape(-1, self.env.N - self.gru.n_ahead - self.gru.seq_length - 2).detach() * torch.exp(-0.5*epsilon**2+epsilon*torch.randn((mini_batch_size, X.shape[0])))
 
@@ -309,7 +320,7 @@ class DDPG():
             r = self.make_reward(batch_S[:, -1], batch_S_p[:, -1], batch_I[:, -1], I_p.reshape(-1,1))#S_p, I_p, r = self.env.step(0, S, I, I_p, batch_theta_true) # step
             
             # compute the Q(S', a*)
-            X_p = self.__stack_state__(batch_S_p[:, -1], I_p.reshape(-1,1), theta_estim_p[:, -1])   #S_p, I_p, theta_estim_p) #################################
+            X_p = self.__stack_state__(batch_S_p[:, -1], I_p.reshape(-1,1), theta_estim_p)   #S_p, I_p, theta_estim_p) #################################
 
             # optimal policy at t+1
             I_pp = self.pi['net'](X_p).detach()
@@ -341,7 +352,7 @@ class DDPG():
             self.pi['optimizer'].zero_grad()
 
             # concatenate states 
-            X = self.__stack_state__(batch_S[:, -1], batch_I[:, -1], theta_estim[:, -1])
+            X = self.__stack_state__(batch_S[:, -1], batch_I[:, -1], theta_estim)
 
             I_p = self.pi['net'](X)
             
@@ -370,11 +381,11 @@ class DDPG():
         if len(self.epsilon)==0:
             self.count=0
             
-        _, S, I, theta_true = self.__grab_mini_batch__(mini_batch_size = 10_000 )
+        _, S, I, theta_true = self.__grab_mini_batch__(mini_batch_size = 10_000 ) #'bank of paths'
 
         for i in tqdm(range(n_iter)): # randomly select the rows of S 
 
-            theta_estim , theta_estim_p ,  batch_S ,  batch_S_p ,  batch_I = self.grab_data(S, I)
+            theta_estim , theta_estim_p ,  batch_S ,  batch_S_p ,  batch_I = self.grab_data(S, I, mini_batch_size = 1) # grabs from the 'bank of paths'
 
             epsilon = np.maximum(C/(D+self.count), 0.02)
             self.epsilon.append(epsilon)
@@ -451,19 +462,23 @@ class DDPG():
         S0 = self.env.S_0
         I0 = 0
 
-        S[:,0] = S0
-        I[:,0] = 0
-        #theta_true[:,0] = 1.1*torch.ones(nsims)
+        #S[:,0] = S0
+        #I[:,0] = 0
+        ##theta_true[:,0] = 1.1*torch.ones(nsims)
         
         ones = torch.ones(nsims)
 
-        _, _, theta_true, _ = self.env.Simulate(S0*ones, I0*ones, model='MC', batch_size=nsims, ret_reward=True, I_p=0, N = N)
-        #S, I, theta
-        theta_true = theta_true[:, :N - self.gru.seq_length + self.gru.n_ahead]
-        theta_estim = self.get_theta(S)
-        S = S[:, :N - self.gru.seq_length + self.gru.n_ahead]
-        I = I[:, :N - self.gru.seq_length + self.gru.n_ahead]
+        #_, _, theta_true, _ = self.env.Simulate(S0*ones, I0*ones, model='MC', batch_size=nsims, ret_reward=True, I_p=0, N = N)
+        ##S, I, theta
+        #theta_true = theta_true[:, :N - self.gru.seq_length + self.gru.n_ahead]
+        #theta_estim = self.get_theta(S)
+        #S = S[:, :N - self.gru.seq_length + self.gru.n_ahead]
+        #I = I[:, :N - self.gru.seq_length + self.gru.n_ahead]
 
+        _, S, I, theta_true = self.__grab_mini_batch__(mini_batch_size = 10_000 )
+
+
+        theta_estim , theta_estim_p ,  batch_S ,  batch_S_p ,  batch_I = self.grab_data(S, I)
 
         for t in range(N - self.gru.seq_length + self.gru.n_ahead - 1):
 

@@ -140,7 +140,7 @@ class MR_env():
 
     def step(self, t, S, I, I_p, theta, batch_size=10):
         
-        batch_size = S.shape[0]
+        #batch_size = S.shape[0]
         
         S_p = theta + (S-theta)*np.exp(-self.kappa*self.dt) \
             + self.eff_vol *  torch.randn(S.shape )#(S.shape)
