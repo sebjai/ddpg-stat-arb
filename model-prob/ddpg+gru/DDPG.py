@@ -25,6 +25,8 @@ import scipy.linalg as linalg
 import random
 torch.autograd.set_detect_anomaly(True)
 
+import pdb
+
 class ANN(nn.Module):
 
     def __init__(self, n_in, n_out, nNodes, nLayers, 
@@ -185,11 +187,14 @@ class DDPG():
             #es[i, -2] = self.fetch_theta(int(es[i, -1]), model='MC')
         #self.get_theta(es[i,  :-2].reshape(1, -1)).detach() for i in range(es.shape[0])
 
-        theta_estim   = self.get_theta(es[:,  :-2].reshape(1, -1)).detach() 
-        theta_estim_p = self.get_theta(es[:, 1:-1].reshape(1, -1)).detach()
-        batch_S       = self.create_snippets(es[:,   :-2])
-        batch_S_p     = self.create_snippets(es[:,  1:-1])
-        batch_I       = self.create_snippets(self.sample_batch(I, mini_batch_size)[:,   :-2])
+        batch_S, theta_estim   = self.get_theta(es[:,  :-1])
+        
+        theta_estim_p = 1.0 * theta_estim[1:,...]
+        theta_estim   = theta_estim[:-1,...]
+        
+        batch_S_p     = 1.0*batch_S[1:,:,-1,:]
+        batch_S       = batch_S[:-1,:,-1,:]
+        batch_I       = torch.zeros(batch_S.shape)
         
         return theta_estim , theta_estim_p ,  batch_S ,  batch_S_p ,  batch_I       
     
@@ -266,10 +271,16 @@ class DDPG():
 
         lg = nn.Softmax(dim=1)
         x =  self.create_snippets(S) # create the snippets for the whole bank of paths
+        snippets_S = x.unsqueeze(axis=-1).transpose(1,2)
         
-        estimated_theta = lg(self.gru.model(x))
+        estimated_theta = torch.zeros((snippets_S.shape[0],
+                                       snippets_S.shape[1],
+                                       len(self.env.theta)))
         
-        return estimated_theta
+        for i in range(snippets_S.shape[1]):
+            estimated_theta[:,i,...] = lg(self.gru.model(snippets_S[:,i,...]))
+        
+        return snippets_S, estimated_theta.detach() 
     
         #x.unsqueeze(-1)
         #np.apply_along_axis(self.create_snippets, axis=1, arr=S.numpy()) 
@@ -303,41 +314,47 @@ class DDPG():
         #theta_estim , theta_estim_p ,  batch_S ,  batch_S_p ,  batch_I  = self.grab_data(mini_batch_size = mini_batch_size)       
         
         for i in range(n_iter):	
+            
+            for t in range(batch_S.shape[0]-1):
 
             
-            self.Q_main['optimizer'].zero_grad()
-
-            # concatenate states
-            X = self.__stack_state__(batch_S[:, -1],
-                                     batch_I[:, -1], 
-                                     theta_estim) #the last one is the one we predict with theta
-
-            I_p = self.pi['net'](X).reshape(-1, self.env.N - self.gru.n_ahead - self.gru.seq_length - 2).detach() * torch.exp(-0.5*epsilon**2+epsilon*torch.randn((mini_batch_size, X.shape[0])))
-
-            Q = self.Q_main['net']( torch.cat((X.reshape(-1, self.env.N - self.gru.n_ahead - self.gru.seq_length - 2), I_p/self.I_max),axis=0).transpose(0,1) )#.reshape(-1, N, 1)
+                self.Q_main['optimizer'].zero_grad()
+    
+                # concatenate states
+                X = self.__stack_state__(batch_S[t],
+                                         batch_I[t], 
+                                         theta_estim[t]) #the last one is the one we predict with theta
                 
-            # step in the environment
-            r = self.make_reward(batch_S[:, -1], batch_S_p[:, -1], batch_I[:, -1], I_p.reshape(-1,1))#S_p, I_p, r = self.env.step(0, S, I, I_p, batch_theta_true) # step
-            
-            # compute the Q(S', a*)
-            X_p = self.__stack_state__(batch_S_p[:, -1], I_p.reshape(-1,1), theta_estim_p)   #S_p, I_p, theta_estim_p) #################################
-
-            # optimal policy at t+1
-            I_pp = self.pi['net'](X_p).detach()
-            
-            # compute the target for Q
-            target = r + self.gamma * self.Q_target['net'](torch.cat((X_p, I_pp/self.I_max), axis=1))
-            
-            loss = torch.mean((target.detach() - Q)**2)
-            
-            # compute the gradients
-            loss.backward(retain_graph=True)
-
-            # perform step using those gradients
-            self.Q_main['optimizer'].step()                
-            self.Q_main['scheduler'].step() 
-            
-            self.Q_loss.append(loss.item())
+                # I_p = self.pi['net'](X).transpose(0,1).detach() * torch.exp(-0.5*epsilon**2+epsilon*torch.randn((mini_batch_size, X.shape[0])))
+                # Q = self.Q_main['net']( torch.cat((X.transpose(0,1), I_p/self.I_max),axis=0).transpose(0,1) )#.reshape(-1, N, 1)
+                
+                batch_I[t+1] = self.pi['net'](X).detach() * torch.exp(-0.5*epsilon**2+epsilon*torch.randn((X.shape[0],mini_batch_size)))
+    
+                Q = self.Q_main['net']( torch.cat((X, batch_I[t+1]/self.I_max),axis=-1) )#.reshape(-1, N, 1)
+                    
+                # step in the environment
+                r = self.make_reward(batch_S[t], batch_S_p[t], batch_I[t], batch_I[t+1])#S_p, I_p, r = self.env.step(0, S, I, I_p, batch_theta_true) # step
+                
+                # compute the Q(S', a*)
+                X_p = self.__stack_state__(batch_S_p[t], batch_I[t+1], theta_estim_p[t])   #S_p, I_p, theta_estim_p) #################################
+    
+                # optimal policy at t+1
+                I_pp = self.pi['net'](X_p).detach()
+                
+                # compute the target for Q
+                target = r + self.gamma * self.Q_target['net'](torch.cat((X_p, I_pp/self.I_max), axis=1))
+                
+                loss = torch.mean((target.detach() - Q)**2)
+                
+                # compute the gradients
+                # loss.backward(retain_graph=True)
+                loss.backward()
+    
+                # perform step using those gradients
+                self.Q_main['optimizer'].step()                
+                self.Q_main['scheduler'].step() 
+                
+                self.Q_loss.append(loss.item())
 
         self.Q_target = copy.deepcopy(self.Q_main)
         
@@ -380,12 +397,12 @@ class DDPG():
         
         if len(self.epsilon)==0:
             self.count=0
-            
+        
         _, S, I, theta_true = self.__grab_mini_batch__(mini_batch_size = 10_000 ) #'bank of paths'
 
         for i in tqdm(range(n_iter)): # randomly select the rows of S 
 
-            theta_estim , theta_estim_p ,  batch_S ,  batch_S_p ,  batch_I = self.grab_data(S, I, mini_batch_size = 1) # grabs from the 'bank of paths'
+            theta_estim , theta_estim_p ,  batch_S ,  batch_S_p ,  batch_I = self.grab_data(S, I, mini_batch_size = 4) # grabs from the 'bank of paths'
 
             epsilon = np.maximum(C/(D+self.count), 0.02)
             self.epsilon.append(epsilon)
@@ -395,6 +412,8 @@ class DDPG():
                           n_iter=n_iter_Q, 
                           mini_batch_size=mini_batch_size, 
                           epsilon=epsilon)
+            
+            pdb.set_trace()
             
             self.Update_pi(batch_S, batch_I,  theta_estim, 
                            n_iter=n_iter_pi, 
