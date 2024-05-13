@@ -24,9 +24,9 @@ ddpg = DDPG(env, gru = gru, I_max = 10,
             n_nodes=20, n_layers=6, 
             name="test" )
 #%%
-import numpy as np
-theta_e , theta_e_p ,  S ,  S_p , I, theta_true = ddpg.grab_data(model_for_theta = 'MC', mini_batch_size = 5000)
-np.savez('grab_data_outputs.npz', theta_estim=theta_e, theta_estim_p=theta_e_p, batch_S=S, batch_S_p=S_p, batch_I=I)
+#import numpy as np
+#theta_e , theta_e_p ,  S ,  S_p , I, theta_true = ddpg.grab_data(model_for_theta = 'MC', mini_batch_size = 5000)
+#np.savez('grab_data_outputs.npz', theta_estim=theta_e, theta_estim_p=theta_e_p, batch_S=S, batch_S_p=S_p, batch_I=I)
 
 # %%        
 ddpg.train(n_iter=10_000, n_plot=200, mini_batch_size=32)

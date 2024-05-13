@@ -422,7 +422,7 @@ class DDPG():
         """
 
         # Get the total number of sequences
-        total_sequences = tensor.size(1)
+        total_sequences = tensor.shape[1]
 
         # Get the total number of batches that can be formed
         total_batches = total_sequences // batch_size
@@ -452,7 +452,7 @@ class DDPG():
                 # Append the random batch to the list
                 random_batches_list.append(random_batch)
 
-        return random_batches_list[0]
+        return torch.tensor(random_batches_list[0])
             
     def train(self, n_iter=1_000, 
               n_iter_Q=10, 
@@ -469,14 +469,14 @@ class DDPG():
             self.count=0
         
        # _, S, I, theta_true = self.__grab_mini_batch__(mini_batch_size = 10_000 ) #'bank of paths'
-        theta_e , theta_e_p ,  S ,  S_p , I, theta_true = self.grab_data(model_for_theta = 'MC', mini_batch_size = 2000)
-        np.savez('grab_data_outputs.npz', theta_estim=theta_e, theta_estim_p=theta_e_p, batch_S=S, batch_S_p=S_p, batch_I=I)
+        #theta_e , theta_e_p ,  S ,  S_p , I, theta_true = self.grab_data(model_for_theta = 'MC', mini_batch_size = 2000)
+        #np.savez('grab_data_outputs.npz', theta_estim=theta_e, theta_estim_p=theta_e_p, batch_S=S, batch_S_p=S_p, batch_I=I)
         data = np.load('grab_data_outputs.npz')
-        theta_estim = data['theta_estim']
-        theta_estim_p = data['theta_estim_p']
-        batch_S = data['batch_S']
-        batch_S_p = data['batch_S_p']
-        batch_I = data['batch_I']
+        theta_e = data['theta_estim']
+        theta_e_p = data['theta_estim_p']
+        S = data['batch_S']
+        S_p = data['batch_S_p']
+        I = data['batch_I']
         # Save the outputs of grab_data to a file
         #np.savez('grab_data_outputs.npz', theta_estim=theta_estim, theta_estim_p=theta_estim_p, batch_S=batch_S, batch_S_p=batch_S_p, batch_I=batch_I)
 
