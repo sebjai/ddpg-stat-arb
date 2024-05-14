@@ -47,7 +47,7 @@ class MR_env():
         #S = self.S_0 + 3*self.inv_vol*torch.randn(batch_size, self.N)
         #I = self.I_max * (2*torch.rand(batch_size, self.N)-1)
         S, _, theta = self.Simulate(self.S_0 + 3*self.inv_vol*torch.randn(batch_size, ),
-                             0, model = type_mod, batch_size = batch_size)
+                             self.I_max * (2*torch.rand(batch_size, self.N)-1), model = type_mod, batch_size = batch_size)
         I = self.I_max * (2*torch.rand(batch_size, self.N)-1)
         
         return S, I, theta
@@ -88,7 +88,6 @@ class MR_env():
                 else:
 
                     theta[:,t] = self.theta[2]
-
 
                 S[:, t+1], I[:,t+1], r[:, t] = self.step(t*self.dt, S[:,t], I[:,t], I_p[:,t], theta[:,t])
 

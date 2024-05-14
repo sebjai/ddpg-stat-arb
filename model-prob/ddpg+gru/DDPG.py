@@ -386,8 +386,8 @@ class DDPG():
 
 
             X = self.__stack_state__(batch_S[t],
-                                         batch_I[t], 
-                                         theta_estim[t])
+                                     batch_I[t], 
+                                     theta_estim[t])
             
             I_p = self.pi['net'](X)
             
@@ -411,14 +411,6 @@ class DDPG():
     def random_batches(self, tensor, batch_size):
         """
         Randomly selects non-repeating batches from a given tensor.
-
-        Args:
-        - tensor (torch.Tensor): The input tensor of shape [batch_dim, sequence_dim, feature_dim].
-        - batch_size (int): The desired batch size.
-
-        Returns:
-        - List[torch.Tensor]: A list of randomly selected non-repeating batches,
-                              each of shape [batch_dim, batch_size, feature_dim].
         """
 
         # Get the total number of sequences
@@ -471,12 +463,12 @@ class DDPG():
        # _, S, I, theta_true = self.__grab_mini_batch__(mini_batch_size = 10_000 ) #'bank of paths'
         #theta_e , theta_e_p ,  S ,  S_p , I, theta_true = self.grab_data(model_for_theta = 'MC', mini_batch_size = 2000)
         #np.savez('grab_data_outputs.npz', theta_estim=theta_e, theta_estim_p=theta_e_p, batch_S=S, batch_S_p=S_p, batch_I=I)
-        data = np.load('grab_data_outputs.npz')
-        theta_e = data['theta_estim']
-        theta_e_p = data['theta_estim_p']
-        S = data['batch_S']
-        S_p = data['batch_S_p']
-        I = data['batch_I']
+        data        = np.load('grab_data_outputs.npz')
+        theta_e     = data['theta_estim']
+        theta_e_p   = data['theta_estim_p']
+        S           = data['batch_S']
+        S_p         = data['batch_S_p']
+        I           = data['batch_I']
         # Save the outputs of grab_data to a file
         #np.savez('grab_data_outputs.npz', theta_estim=theta_estim, theta_estim_p=theta_estim_p, batch_S=batch_S, batch_S_p=batch_S_p, batch_I=batch_I)
 

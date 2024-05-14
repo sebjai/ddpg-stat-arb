@@ -25,7 +25,7 @@ torch.save(model.model.state_dict(), 'model.pth')
 model.model.load_state_dict(torch.load('model.pth'))
 model.pred()
 
-mod_hamilton = sm.tsa.MarkovAutoregression(
-    dta_hamilton, k_regimes=2, order=4, switching_ar=False
-)
+#mod_hamilton = sm.tsa.MarkovAutoregression(
+#    dta_hamilton, k_regimes=2, order=4, switching_ar=False
+#)
 # %%
