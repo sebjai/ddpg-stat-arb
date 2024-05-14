@@ -69,10 +69,9 @@ class DDPG():
     def __init__(self, env: Environment, gru: RNN , I_max=10, 
                  gamma=0.99,  
                  n_nodes=36, n_layers=6, 
-                 lr=1e-3, sched_step_size = 100,
+                 lr=1e-3, sched_step_size = 100, tau=0.001,
                  name=""):
 
-        self.env = env
         self.gamma = gamma
         self.I_max = I_max
         self.n_nodes = n_nodes
@@ -83,6 +82,7 @@ class DDPG():
         self.seq_length = gru.seq_length
         self.n_ahead = gru.n_ahead
         self.lg = nn.Softmax(dim=1)
+        self.tau = tau
         
         self.__initialize_NNs__()
         
@@ -96,6 +96,8 @@ class DDPG():
         self.pi_loss = []
         self.gru = gru
         self.gru.model.load_state_dict(torch.load('model.pth')) # load the model
+        
+        self.env = env
 
     def __initialize_NNs__(self):
         
@@ -129,7 +131,8 @@ class DDPG():
         optimizer = optim.AdamW(net['net'].parameters(),
                                 lr=self.lr)
                     
-        scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma = 0.99)#optim.lr_scheduler.StepLR(optimizer, step_size=self.sched_step_size,  gamma=0.99)
+        # scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma = 0.99)
+        scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=self.sched_step_size,  gamma=0.99)
     
         return optimizer, scheduler
     
@@ -174,9 +177,11 @@ class DDPG():
 
     def obtain_data(self, mini_batch_size = 256, N =  12, train = True):
             
-            
-        S, _, theta_true = self.env.Simulate(s0=self.env.S_0 + 3*self.env.inv_vol*torch.randn(mini_batch_size, ), i0=self.I_max * (2*torch.rand(mini_batch_size)-1), model = 'MC', batch_size=mini_batch_size, ret_reward = False, I_p = 0, N = N)
-        I = torch.zeros((mini_batch_size, S.shape[1]))
+        S, _, theta_true = self.env.Simulate(s0=self.env.S_0 + 3*self.env.inv_vol*torch.randn(mini_batch_size, ), 
+                                             i0=self.I_max * (2*torch.rand(mini_batch_size)-1), 
+                                             model = 'MC', batch_size=mini_batch_size, ret_reward = False, 
+                                             I_p = 0, N = N)
+
         I = self.I_max * (2*torch.rand(mini_batch_size, S.shape[1])-1)
         
         if train == True:   
@@ -227,24 +232,30 @@ class DDPG():
         #
         #return snippets_S, estimated_theta.detach() 
 
-    def Update_Q(self, batch_S, batch_I, theta_estim, theta_estim_p, epsilon=0.02, n_iter_Q=1):
+    def Update_Q(self, mini_batch_size=256, epsilon=0.02, n_iter_Q=1):
 
         for i in range(n_iter_Q):
+            
+            batch_S, batch_I, theta_estim, theta_estim_p = self.obtain_data(mini_batch_size, N = self.env.N+1)
 
             self.Q_main['optimizer'].zero_grad()
     
             # concatenate states
-            X = self.__stack_state__(batch_S[:,-2], batch_I[:,-2],  theta_estim) 
-        
-            I_p = self.pi['net'](X).detach() * torch.exp(-0.5*epsilon**2+epsilon*torch.randn(1))
+            X = self.__stack_state__(batch_S[:,self.seq_length-1], 
+                                     batch_I[:,self.seq_length-1],
+                                     theta_estim) 
+            
+            I_p = self.pi['net'](X).detach() * torch.exp(-0.5*epsilon**2+epsilon*torch.randn(batch_S.shape[0],1))
     
             Q = self.Q_main['net']( torch.cat((X, I_p/self.I_max),axis=-1) )
             
             # step in the environment
-            r = self.make_reward(batch_S[:, -2], batch_S[:, -1], batch_I[:, -2], I_p)
+            r = self.make_reward(batch_S[:, self.seq_length-1], 
+                                 batch_S[:, self.seq_length], 
+                                 batch_I[:, self.seq_length-1], I_p)
 
             # compute the Q(S', a*)
-            X_p = self.__stack_state__(batch_S[:, -1], I_p.squeeze(-1), theta_estim_p)   
+            X_p = self.__stack_state__(batch_S[:, self.seq_length], I_p.squeeze(-1), theta_estim_p)   
 
             # optimal policy at t+1
             I_pp = self.pi['net'](X_p).detach()
@@ -262,15 +273,24 @@ class DDPG():
         
             self.Q_loss.append(loss.item())
 
-        self.Q_target = copy.deepcopy(self.Q_main)
+            self.soft_update( self.Q_main['net'], self.Q_target['net'])
         
-    def Update_pi(self, batch_S, batch_I,  theta_estim, epsilon=0.02, n_iter_pi=10):
+    def soft_update(self, main, target):
+    
+        for param, target_param in zip(main.parameters(), target.parameters()):
+            target_param.data.copy_(self.tau * param.data + (1.0 - self.tau) * target_param.data)
+        
+    def Update_pi(self, mini_batch_size=256, epsilon=0.02, n_iter_pi=10):
 
         for i in range(n_iter_pi):
+            
+            batch_S, batch_I, theta_estim, _ = self.obtain_data(mini_batch_size, N = self.env.N+1)
 
             self.pi['optimizer'].zero_grad()
 
-            X = self.__stack_state__(batch_S[:,-2], batch_I[:,-2],  theta_estim) 
+            X = self.__stack_state__(batch_S[:,self.seq_length-1], 
+                                     batch_I[:,self.seq_length-1],  
+                                     theta_estim) 
         
             I_p = self.pi['net'](X)
             
@@ -298,18 +318,14 @@ class DDPG():
             self.epsilon.append(epsilon)
             self.count += 1
 
-            N = self.env.N+1
-            
-            S, I, theta_post, theta_post_p = self.obtain_data(mini_batch_size, N = N)
+            self.Update_Q(mini_batch_size=mini_batch_size, epsilon = epsilon, n_iter_Q= n_iter_Q )
 
-            self.Update_Q(S, I, theta_post, theta_post_p, epsilon = epsilon, n_iter_Q= n_iter_Q )
-
-            self.Update_pi(S, I,  theta_post, epsilon = epsilon, n_iter_pi = n_iter_pi)
+            self.Update_pi(mini_batch_size=mini_batch_size, epsilon = epsilon, n_iter_pi = n_iter_pi)
 
             if np.mod(i+1,n_plot) == 0:
                 
                 self.loss_plots()
-                self.run_strategy(name= datetime.now().strftime("%H_%M_%S"), N = 111)
+                self.run_strategy(name= datetime.now().strftime("%H_%M_%S"), N = 500)
 
     def moving_average(self, x, n):
         
@@ -361,50 +377,51 @@ class DDPG():
 
         S = self.obtain_data(mini_batch_size   =  1, N = N, train = False)
 
-        for t in range(N-12):
+        for t in range(N-self.seq_length):
 
             theta_post = self.get_theta(S[:, t:t+self.seq_length+1])
 
-            X = self.__stack_state__(S[:, t+self.seq_length+1].T, I[:, t+self.seq_length+1].T, theta_post)
+            X = self.__stack_state__(S[:, t+self.seq_length-1].T, I[:, t+self.seq_length-1].T, theta_post)
 
-            I[:, t+self.seq_length+2] = self.pi['net'](X).reshape(-1).detach().unsqueeze(-1)
+            I[:, t+self.seq_length] = self.pi['net'](X).reshape(-1).detach().unsqueeze(-1)
 
-            r[:, t+1] = self.make_reward(S[:,t+self.seq_length+1], 
-                                         S[:,t+self.seq_length+2],
-                                         I[:,t+self.seq_length+1], 
-                                         I[:,t+self.seq_length+2])
+            r[:, t+1] = self.make_reward(S[:,t+self.seq_length-1], 
+                                         S[:,t+self.seq_length],
+                                         I[:,t+self.seq_length-1], 
+                                         I[:,t+self.seq_length])
 
         I  =    I.detach().numpy()
         r =     r.detach().numpy()
 
-        t = N#self.env.dt*np.arange(0, N+1)/self.env.T
+        # t = N#
+        t = self.env.dt*np.arange(0, N)/self.env.T
         
         plt.figure(figsize=(5,5))
         n_paths = 3
         
-        def plot(t, x, plt_i, title ):
+        # def plot(t, x, plt_i, title ):
             
-            qtl= np.quantile(x, [0.05, 0.5, 0.95], axis=0)
+        #     qtl= np.quantile(x, [0.05, 0.5, 0.95], axis=0)
             
-            plt.subplot(2, 2, plt_i)
+        #     plt.subplot(2, 2, plt_i)
             
-            plt.fill_between(t, qtl[0,:], qtl[2,:], alpha=0.5)
-            plt.plot(t, qtl[1, :], color='k', linewidth=1)
-            for i in range(3):
+        #     plt.fill_between(t, qtl[0,:], qtl[2,:], alpha=0.5)
+        #     plt.plot(t, qtl[1, :], color='k', linewidth=1)
+        #     for i in range(3):
 
-                plt.plot(t, x[i, :], linewidth=1)
+        #         plt.plot(t, x[i, :], linewidth=1)
             
-            plt.title(title)
-            plt.xlabel(r"$t$")
+        #     plt.title(title)
+        #     plt.xlabel(r"$t$")
 
         plt.figure(figsize=(15, 5))
         
         plt.subplot(1,3, 1)
         
-        plt.plot((S[:,:-2]).squeeze(0).numpy())#plot(t, (S - S[:,0]).squeeze(0).numpy(), 1, r"$S_t - S_0$" )
+        plt.plot((S[:,self.seq_length:-2]).squeeze(0).numpy())#plot(t, (S - S[:,0]).squeeze(0).numpy(), 1, r"$S_t - S_0$" )
         plt.title("Stock price")
         plt.subplot(1,3, 2)
-        plt.plot(I[:,:-2].squeeze(0)) #(t, I.squeeze(0).numpy(), 2, r"$I_t$")
+        plt.plot(I[:,self.seq_length:-2].squeeze(0)) #(t, I.squeeze(0).numpy(), 2, r"$I_t$")
         plt.title("Inventory")
         plt.subplot(1,3, 3)
         #plt.plot(np.cumsum(r[:,:-2], axis=1))
