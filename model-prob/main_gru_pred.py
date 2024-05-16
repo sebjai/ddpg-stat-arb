@@ -16,7 +16,7 @@ import statsmodels.api as sm
 model = gru_pred(T=40, 
                  learning_rate = 0.001,
                  seq_length=10, n_ahead=1, 
-                 dropout_rate=0, kappa=5, sigma=0.22, dt=0.2)
+                 dropout_rate=0, kappa=5, sigma=0.3, dt=0.2)
 #%%
 model.train(num_epochs = 10_000, n_print=500)
 # %%

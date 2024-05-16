@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from MR_env_ddpg import MR_env
 from DDPG_new import DDPG
 from gru_pred import gru_pred
+#from main_gru_pred import model
 
 import os
 os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
@@ -16,7 +17,7 @@ os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
 model = gru_pred(T=40, 
                  learning_rate = 0.001,
                  seq_length=10, n_ahead=1, 
-                 dropout_rate=0, kappa=5, sigma=0.22, dt=0.2)
+                 dropout_rate=0, kappa=5, sigma=0.3, dt=0.2)
 
 env = MR_env(S_0 = model.env.S_0 , kappa = model.env.kappa, sigma = model.env.sigma, theta = model.env.theta,
              dt = model.env.dt, T = model.env.T, 
@@ -33,7 +34,7 @@ ddpg = DDPG(env, gru = model, I_max = 10,
             name="test" )
 
 # %%        
-ddpg.train(n_iter=10_000, n_iter_Q = 1, n_iter_pi = 5, n_plot=100, mini_batch_size=512)
+ddpg.train(n_iter=10_000, n_iter_Q = 1, n_iter_pi = 5, n_plot=10, mini_batch_size=512)
 
 # %%
 model.env.S_0
