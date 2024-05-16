@@ -69,7 +69,7 @@ class DDPG():
     def __init__(self, env: Environment, gru: RNN , I_max=10, 
                  gamma=0.99,  
                  n_nodes=36, n_layers=6, 
-                 lr=1e-3, sched_step_size = 100, tau=0.001,
+                 lr=1e-3, sched_step_size = 50, tau=0.001,
                  name=""):
 
         self.gamma = gamma
@@ -379,28 +379,28 @@ class DDPG():
         r =     r.detach().numpy()
 
         # t = N#
-        t = self.env.dt*np.arange(0, N)/self.env.T
-        
+        a = self.env.dt*np.arange(0, N)/self.env.T
+        t = a[:-(self.seq_length + 2)]
         plt.figure(figsize=(5,5))
         n_paths = 3
 
-        plt.figure(figsize=(15, 5))
+        plt.figure(figsize=(10, 15))
         
-        plt.subplot(1,3, 1)
-        
+        plt.subplot(3,1, 1)
         plt.plot((S[:,self.seq_length:-2]).squeeze(0).numpy())#plot(t, (S - S[:,0]).squeeze(0).numpy(), 1, r"$S_t - S_0$" )
         plt.title("Stock price")
-        plt.subplot(1,3, 2)
+
+        plt.subplot(3,1, 2)
         plt.plot(I[:,self.seq_length:-2].squeeze(0)) #(t, I.squeeze(0).numpy(), 2, r"$I_t$")
         plt.title("Inventory")
-        plt.subplot(1,3, 3)
-        #plt.plot(np.cumsum(r[:,:-2], axis=1))
-        #plt.title("cumulative return")
-        #plt.show()
-        #plot(t, np.cumsum(r, axis=0), 3, r"$r_t$")
-        #plt.subplot(2,2, 4)
-        plt.hist(np.sum(r[:,:-2],axis=0), bins=51)
-        plt.title("histogram of returns")
+
+        plt.subplot(3,1, 3)
+        plt.plot(np.cumsum(r.squeeze(0)))
+        plt.title("cumulative return")
+
+        #plt.subplot(4,1, 4)
+        #plt.hist(r.squeeze(0), bins=51)
+        #plt.title("histogram of returns")
         plt.tight_layout()
         
         plt.savefig("path_"  +self.name + "_" + name + ".pdf", format='pdf', bbox_inches='tight')
