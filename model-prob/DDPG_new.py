@@ -418,6 +418,51 @@ class DDPG():
         plt.savefig("path_"  +self.name + "_" + name + ".pdf", format='pdf', bbox_inches='tight')
         plt.show()
     
+    def plot_policy(self, name=""):
+        NS = 101
+        S = torch.linspace(self.env.S_0 - 3*self.env.inv_vol,
+                           self.env.S_0 + 3*self.env.inv_vol,
+                           NS)
+        NI = 51
+        I = torch.linspace(-self.I_max, self.I_max, NI)
+        Sm, Im = torch.meshgrid(S, I,indexing='ij')
+        def plot(a, ax):
+            cs = ax.contourf(Sm.squeeze().numpy(), Im.squeeze().numpy(), a.numpy(),
+                              levels=np.linspace(-self.I_max, self.I_max, 21),
+                              cmap='RdBu')
+            ax.axvline(self.env.S_0, linestyle='--', color='g')
+            ax.axvline(self.env.S_0-2*self.env.inv_vol, linestyle='--', color='k')
+            ax.axvline(self.env.S_0+2*self.env.inv_vol, linestyle='--', color='k')
+            ax.axhline(0, linestyle='--', color='k')
+            ax.axhline(self.I_max/2, linestyle='--', color='k')
+            ax.axhline(-self.I_max/2, linestyle='--', color='k')
+            # cbar = fig.colorbar(cs, ax=ax, shrink=0.9)
+            # cbar.set_ticks(np.linspace(-self.I_max, self.I_max, 11))
+            # cbar.ax.set_ylabel('Action')
+        Sm = Sm.unsqueeze(-1)
+        Im = Im.unsqueeze(-1)
+        ones = torch.ones(Sm.shape)
+        pi_all = [0.25, 0.5, 0.75]
+        fig, ax = plt.subplots(3,3, figsize=(8,8), sharex=True,sharey=True)
+        for i in range(len(pi_all)):
+            for j in range(len(pi_all)):
+                pi1 = pi_all[i]
+                pi2 = pi_all[j]
+                pi3 = 1-pi1-pi2
+                theta_estim = torch.cat((pi1*ones, pi2*ones, pi3*ones),axis=-1)
+                X = torch.cat(((Sm/self.env.S_0-1.0),
+                               (Im/self.I_max  ),
+                               theta_estim), axis=-1)
+                a = self.pi['net'](X).detach().squeeze()
+                plot(a, ax[i,j])
+        plt.tight_layout()
+        fig.add_subplot(111, frameon=False)
+        plt.tick_params(labelcolor='none', which='both', top=False, bottom=False, left=False, right=False)
+        plt.xlabel("Price")
+        plt.ylabel("Inventory")
+        plt.show()
+
+
 
 
 
