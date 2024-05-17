@@ -34,9 +34,14 @@ ddpg = DDPG(env, gru = model, I_max = 10,
             name="test" )
 
 # %%        
-ddpg.train(n_iter=10_000, n_iter_Q = 1, n_iter_pi = 5, n_plot=100, mini_batch_size=512)
+#ddpg.train(n_iter=10_000, n_iter_Q = 1, n_iter_pi = 5, n_plot=100, mini_batch_size=512)
 
-# %%
-model.env.S_0
-
+#import torch
+#torch.save(ddpg.pi['net'].state_dict(), 'pi.pth')
+#torch.save(ddpg.Q_main['net'].state_dict(), 'Q.pth')
+#%%
+import torch
+ddpg.pi['net'].load_state_dict(torch.load('pi.pth'))
+ddpg.run_strategy(N=1000)
 ddpg.plot_policy()
+

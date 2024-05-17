@@ -18,7 +18,7 @@ import scipy.linalg as linalg
 import random
 import pdb
 import numpy as np
-
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 class ANN(nn.Module):
 
@@ -418,44 +418,57 @@ class DDPG():
         plt.savefig("path_"  +self.name + "_" + name + ".pdf", format='pdf', bbox_inches='tight')
         plt.show()
     
+    
     def plot_policy(self, name=""):
         NS = 101
-        S = torch.linspace(self.env.S_0 - 3*self.env.inv_vol,
-                           self.env.S_0 + 3*self.env.inv_vol,
+        S = torch.linspace(self.env.S_0 - 5*self.env.inv_vol,
+                           self.env.S_0 + 5*self.env.inv_vol,
                            NS)
         NI = 51
         I = torch.linspace(-self.I_max, self.I_max, NI)
-        Sm, Im = torch.meshgrid(S, I,indexing='ij')
+        Sm, Im = torch.meshgrid(S, I, indexing='ij')
+
         def plot(a, ax):
             cs = ax.contourf(Sm.squeeze().numpy(), Im.squeeze().numpy(), a.numpy(),
-                              levels=np.linspace(-self.I_max, self.I_max, 21),
-                              cmap='RdBu')
+                             levels=np.linspace(-self.I_max, self.I_max, 21),
+                             cmap='RdBu')
             ax.axvline(self.env.S_0, linestyle='--', color='g')
             ax.axvline(self.env.S_0-2*self.env.inv_vol, linestyle='--', color='k')
             ax.axvline(self.env.S_0+2*self.env.inv_vol, linestyle='--', color='k')
             ax.axhline(0, linestyle='--', color='k')
             ax.axhline(self.I_max/2, linestyle='--', color='k')
             ax.axhline(-self.I_max/2, linestyle='--', color='k')
-            # cbar = fig.colorbar(cs, ax=ax, shrink=0.9)
-            # cbar.set_ticks(np.linspace(-self.I_max, self.I_max, 11))
-            # cbar.ax.set_ylabel('Action')
+            return cs
+
         Sm = Sm.unsqueeze(-1)
         Im = Im.unsqueeze(-1)
         ones = torch.ones(Sm.shape)
-        pi_all = [0.25, 0.5, 0.75]
-        fig, ax = plt.subplots(3,3, figsize=(8,8), sharex=True,sharey=True)
+        pi_all = [(0.9, 0.05, 0.05),  # pi1 high
+                  (0.05, 0.9, 0.05),  # pi2 high
+                  (0.05, 0.05, 0.9)]  # pi3 high
+
+        fig, ax = plt.subplots(1, 3, figsize=(15, 5), sharex=True, sharey=True)
         for i in range(len(pi_all)):
-            for j in range(len(pi_all)):
-                pi1 = pi_all[i]
-                pi2 = pi_all[j]
-                pi3 = 1-pi1-pi2
-                theta_estim = torch.cat((pi1*ones, pi2*ones, pi3*ones),axis=-1)
-                X = torch.cat(((Sm/self.env.S_0-1.0),
-                               (Im/self.I_max  ),
-                               theta_estim), axis=-1)
-                a = self.pi['net'](X).detach().squeeze()
-                plot(a, ax[i,j])
-        plt.tight_layout()
+            pi1, pi2, pi3 = pi_all[i]
+            theta_estim = torch.cat((pi1 * ones, pi2 * ones, pi3 * ones), axis=-1)
+            X = torch.cat(((Sm / self.env.S_0 - 1.0),
+                           (Im / self.I_max),
+                           theta_estim), axis=-1)
+            a = self.pi['net'](X).detach().squeeze()
+            cs = plot(a, ax[i])
+            #ax[i].set_title(f"$\pi_{{{i+1}}}$ high")
+            ax[0].set_title(f"$\pi_1$ high \n $\\theta = 0.9$")
+            ax[1].set_title(f"$\pi_2$ high \n $\\theta = 1$")
+            ax[2].set_title(f"$\pi_3$ high \n $\\theta = 1.1$")
+
+        # Create an axis for the colorbar on the right side of the figure
+        fig.subplots_adjust(right=0.85)
+        cbar_ax = fig.add_axes([0.87, 0.15, 0.03, 0.7])
+        cbar = fig.colorbar(cs, cax=cbar_ax)
+        cbar.set_ticks(np.linspace(-self.I_max, self.I_max, 11))
+        cbar.ax.set_ylabel('Action')
+
+        plt.tight_layout(rect=[0, 0, 0.85, 1])
         fig.add_subplot(111, frameon=False)
         plt.tick_params(labelcolor='none', which='both', top=False, bottom=False, left=False, right=False)
         plt.xlabel("Price")
@@ -467,5 +480,4 @@ class DDPG():
 
 
 
-            
 
