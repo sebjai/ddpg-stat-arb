@@ -353,7 +353,7 @@ class DDPG():
         plt.tight_layout()
         plt.show()
 
-    def run_strategy(self, name= datetime.now().strftime("%H_%M_%S"), N = 12):
+    def run_strategy(self, name= datetime.now().strftime("%H_%M_%S"), N = 12, no_plots = False):
 
         S = torch.zeros((1, N+2)).float()         
         I = torch.zeros((1, N+2)).float()
@@ -378,45 +378,51 @@ class DDPG():
         I  =    I.detach().numpy()
         r =     r.detach().numpy()
 
-        # t = N#
-        a = self.env.dt*np.arange(0, N)/self.env.T
-        t = a[:-(self.seq_length + 2)]
-        plt.figure(figsize=(5,5))
-        n_paths = 3
 
-        #plt.figure(figsize=(10, 15))
+        if no_plots == False:
+            # t = N#
+            a = self.env.dt*np.arange(0, N)/self.env.T
+            t = a[:-(self.seq_length + 2)]
+            plt.figure(figsize=(5,5))
+            n_paths = 3
+
+            #plt.figure(figsize=(10, 15))
+
+            #plt.subplot(2,1, 1)
+            fig, ax1 = plt.subplots()
+
+            ax1.plot((S[:,self.seq_length:-2]).squeeze(0).numpy(), label = 'Stock price')
+            ax1.set_ylabel('Stock price')
+            ax1.set_xlabel('Time')
+            ax1.legend(loc='upper left')
+
+            ax2 = ax1.twinx()
+            ax2.plot((I[:,self.seq_length:-2]).squeeze(0), color='red', label = 'Inventory')
+            ax2.set_ylabel('Inventory')
+            ax2.legend(loc='upper right')
+
+            plt.title("Stock price and Inventory")
+            plt.show()
+
+            #plt.subplot(3,1, 2)
+             #(t, I.squeeze(0).numpy(), 2, r"$I_t$")
+            #plt.title("Inventory")
+
+            #plt.subplot(2,1, 2)
+            plt.plot(np.cumsum(r.squeeze(0)))
+            plt.title("cumulative return")
+
+            #plt.subplot(4,1, 4)
+            #plt.hist(r.squeeze(0), bins=51)
+            #plt.title("histogram of returns")
+            plt.tight_layout()
         
-        #plt.subplot(2,1, 1)
-        fig, ax1 = plt.subplots()
+            plt.savefig("path_"  +self.name + "_" + name + ".pdf", format='pdf', bbox_inches='tight')
+            plt.show()
 
-        ax1.plot((S[:,self.seq_length:-2]).squeeze(0).numpy(), label = 'Stock price')
-        ax1.set_ylabel('Stock price')
-        ax1.set_xlabel('Time')
-        ax1.legend(loc='upper left')
-
-        ax2 = ax1.twinx()
-        ax2.plot((I[:,self.seq_length:-2]).squeeze(0), color='red', label = 'Inventory')
-        ax2.set_ylabel('Inventory')
-        ax2.legend(loc='upper right')
-
-        plt.title("Stock price and Inventory")
-        plt.show()
-
-        #plt.subplot(3,1, 2)
-         #(t, I.squeeze(0).numpy(), 2, r"$I_t$")
-        #plt.title("Inventory")
-
-        #plt.subplot(2,1, 2)
-        plt.plot(np.cumsum(r.squeeze(0)))
-        plt.title("cumulative return")
-
-        #plt.subplot(4,1, 4)
-        #plt.hist(r.squeeze(0), bins=51)
-        #plt.title("histogram of returns")
-        plt.tight_layout()
-        
-        plt.savefig("path_"  +self.name + "_" + name + ".pdf", format='pdf', bbox_inches='tight')
-        plt.show()
+            return r
+        if no_plots == True:
+            return r    
     
     
     def plot_policy(self, name=""):

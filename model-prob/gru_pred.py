@@ -287,6 +287,8 @@ class gru_pred():
         ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1))
         ax2.legend(loc='upper left', bbox_to_anchor=(-0.43, 1))
         fig.text(0.5, 0.01, r'The possible levels for $\theta$ are: $\theta^{(0)}$ = 0.9, $\theta^{(1)}$ = 1, $\theta^{(2)}$ = 1.1 ', ha='center')
+        np.save('S.npy', x)
+        np.save('Y.npy', y)
         plt.show()
         
         
