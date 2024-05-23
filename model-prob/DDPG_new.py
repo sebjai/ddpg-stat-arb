@@ -430,13 +430,13 @@ class DDPG():
         S = torch.linspace(self.env.S_0 - 5*self.env.inv_vol,
                            self.env.S_0 + 5*self.env.inv_vol,
                            NS)
-        NI = 51
-        I = torch.linspace(-self.I_max, self.I_max, NI)
+        NI = 101
+        I = torch.linspace(-self.I_max/2, self.I_max/2, NI)
         Sm, Im = torch.meshgrid(S, I, indexing='ij')
 
         def plot(a, ax):
             cs = ax.contourf(Sm.squeeze().numpy(), Im.squeeze().numpy(), a.numpy(),
-                             levels=np.linspace(-self.I_max, self.I_max, 21),
+                             levels=np.linspace(-self.I_max/2, self.I_max/2, 21),
                              cmap='RdBu')
             ax.axvline(self.env.S_0, linestyle='--', color='g')
             ax.axvline(self.env.S_0-2*self.env.inv_vol, linestyle='--', color='k')
@@ -449,29 +449,29 @@ class DDPG():
         Sm = Sm.unsqueeze(-1)
         Im = Im.unsqueeze(-1)
         ones = torch.ones(Sm.shape)
-        pi_all = [(0.9, 0.05, 0.05),  # pi1 high
-                  (0.05, 0.9, 0.05),  # pi2 high
-                  (0.05, 0.05, 0.9)]  # pi3 high
+        pi_all = [(0.8, 0.1, 0.1),  # pi1 high
+                  (0.1, 0.8, 0.1),  # pi2 high
+                  (0.1, 0.1, 0.8)]  # pi3 high
 
         fig, ax = plt.subplots(1, 3, figsize=(15, 5), sharex=True, sharey=True)
         for i in range(len(pi_all)):
             pi1, pi2, pi3 = pi_all[i]
             theta_estim = torch.cat((pi1 * ones, pi2 * ones, pi3 * ones), axis=-1)
             X = torch.cat(((Sm / self.env.S_0 - 1.0),
-                           (Im / self.I_max),
+                           (Im / (self.I_max/2)),
                            theta_estim), axis=-1)
             a = self.pi['net'](X).detach().squeeze()
             cs = plot(a, ax[i])
             #ax[i].set_title(f"$\pi_{{{i+1}}}$ high")
-            ax[0].set_title(f"$\pi_1$ high \n $\\theta = 0.9$")
-            ax[1].set_title(f"$\pi_2$ high \n $\\theta = 1$")
-            ax[2].set_title(f"$\pi_3$ high \n $\\theta = 1.1$")
+            ax[0].set_title(f"$\phi_1$ high \n $\\theta = 0.9$")
+            ax[1].set_title(f"$\phi_2$ high \n $\\theta = 1$")
+            ax[2].set_title(f"$\phi_3$ high \n $\\theta = 1.1$")
 
         # Create an axis for the colorbar on the right side of the figure
         fig.subplots_adjust(right=0.85)
         cbar_ax = fig.add_axes([0.87, 0.15, 0.03, 0.7])
         cbar = fig.colorbar(cs, cax=cbar_ax)
-        cbar.set_ticks(np.linspace(-self.I_max, self.I_max, 11))
+        cbar.set_ticks(np.linspace(-self.I_max/2, self.I_max/2, 11))
         cbar.ax.set_ylabel('Action')
 
         plt.tight_layout(rect=[0, 0, 0.85, 1])

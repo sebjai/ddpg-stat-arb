@@ -93,63 +93,53 @@ import numpy as np
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 def plot_policy(ddpg, name=""):
-    self = ddpg
-    NS = 101
-    S = torch.linspace(self.env.S_0 - 3*self.env.inv_vol,
-                       self.env.S_0 + 3*self.env.inv_vol,
-                       NS)
-    NI = 51
-    I = torch.linspace(-self.I_max/2, self.I_max/2, NI)
-    Sm, Im = torch.meshgrid(S, I, indexing='ij')
-    
-    def plot(a, ax):
-        cs = ax.contourf(Sm.squeeze().numpy(), Im.squeeze().numpy(), a.numpy(),
-                         levels=np.linspace(-self.I_max, self.I_max, 21),
-                         cmap='RdBu')
-        ax.axvline(self.env.S_0, linestyle='--', color='g')
-        ax.axvline(self.env.S_0-2*self.env.inv_vol, linestyle='--', color='k')
-        ax.axvline(self.env.S_0+2*self.env.inv_vol, linestyle='--', color='k')
-        ax.axhline(0, linestyle='--', color='k')
-        ax.axhline(self.I_max/2, linestyle='--', color='k')
-        ax.axhline(-self.I_max/2, linestyle='--', color='k')
-        return cs
-
-    Sm = Sm.unsqueeze(-1)
-    Im = Im.unsqueeze(-1)
-    ones = torch.ones(Sm.shape)
-    pi_all = [0.8, 0.2, 0.2]
-
-    fig, ax = plt.subplots(3, 1, figsize=(10, 10), sharex=True, sharey=True)
-    for i in range(len(pi_all)):
-        for j in range(len(pi_all)):
-            pi1 = pi_all[i]
-            pi2 = pi_all[j]
-            pi3 = 1 - pi1 - pi2
-            theta_estim = torch.cat((pi1 * ones, pi2 * ones, pi3 * ones), axis=-1)
-            X = torch.cat(((Sm / self.env.S_0 - 1.0),
-                           (Im / self.I_max),
-                           theta_estim), axis=-1)
-            a = ddpg.pi['net'](X).detach().squeeze()
-            cs = plot(a, ax[i, j])
-            ax[j, i].set_ylabel(f"$\pi${j + 1} " if i == 0 else None)
-    
-    # Create an axis for the colorbar on the right side of the figure
-    fig.subplots_adjust(right=0.85)
-    cbar_ax = fig.add_axes([0.87, 0.15, 0.03, 0.7])
-    cbar = fig.colorbar(cs, cax=cbar_ax)
-    cbar.set_ticks(np.linspace(-self.I_max, self.I_max, 11))
-    cbar.ax.set_ylabel('Action')
-
-    #plt.tight_layout(rect=[0, 0, 0.85, 1])
-    fig.add_subplot(111, frameon=False)
-    plt.tick_params(labelcolor='none', which='both', top=False, bottom=False, left=False, right=False)
-    plt.xlabel("Price")
-    plt.ylabel("Inventory")
-    plt.show()
+        NS = 101
+        I_max = 10
+        S = torch.linspace( env.S_0 - 3* env.inv_vol,
+                            env.S_0 + 3* env.inv_vol,
+                           NS)
+        NI = 51
+        I = torch.linspace(- I_max,  I_max, NI)
+        Sm, Im = torch.meshgrid(S, I,indexing='ij')
+        def plot(a, ax):
+            cs = ax.contourf(Sm.squeeze().numpy(), Im.squeeze().numpy(), a.numpy(),
+                              levels=np.linspace(- I_max,  I_max, 21),
+                              cmap='RdBu')
+            ax.axvline( env.S_0, linestyle='--', color='g')
+            ax.axvline( env.S_0-2* env.inv_vol, linestyle='--', color='k')
+            ax.axvline( env.S_0+2* env.inv_vol, linestyle='--', color='k')
+            ax.axhline(0, linestyle='--', color='k')
+            ax.axhline( I_max/2, linestyle='--', color='k')
+            ax.axhline(- I_max/2, linestyle='--', color='k')
+            # cbar = fig.colorbar(cs, ax=ax, shrink=0.9)
+            # cbar.set_ticks(np.linspace(- I_max,  I_max, 11))
+            # cbar.ax.set_ylabel('Action')
+        Sm = Sm.unsqueeze(-1)
+        Im = Im.unsqueeze(-1)
+        ones = torch.ones(Sm.shape)
+        pi_all = [0.25, 0.5, 0.75]
+        fig, ax = plt.subplots(3,3, figsize=(8,8), sharex=True,sharey=True)
+        for i in range(len(pi_all)):
+            for j in range(len(pi_all)):
+                pi1 = pi_all[i]
+                pi2 = pi_all[j]
+                pi3 = 1-pi1-pi2
+                theta_estim = torch.cat((pi1*ones, pi2*ones, pi3*ones),axis=-1)
+                X = torch.cat(((Sm/ env.S_0-1.0),
+                               (Im/ I_max  ),
+                               theta_estim), axis=-1)
+                a =  ddpg.pi['net'](X).detach().squeeze()
+                plot(a, ax[i,j])
+        plt.tight_layout()
+        fig.add_subplot(111, frameon=False)
+        plt.tick_params(labelcolor='none', which='both', top=False, bottom=False, left=False, right=False)
+        plt.xlabel("Price")
+        plt.ylabel("Inventory")
+        plt.show()
 
 #%%
 
-ddpg.plot_policy()
+plot_policy(ddpg)
 # %%
 
 S = ddpg.obtain_data(mini_batch_size   =  1, N = 1000, train = False)
