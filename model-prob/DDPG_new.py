@@ -19,6 +19,7 @@ import random
 import pdb
 import numpy as np
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from matplotlib.animation import FuncAnimation, PillowWriter
 
 class ANN(nn.Module):
 
@@ -142,8 +143,7 @@ class DDPG():
             (S/self.env.S_0-1.0).unsqueeze(-1), 
             (I/self.I_max  ).unsqueeze(-1), 
             theta_estim), axis=1)
-
-    
+  
     def __grab_mini_batch__(self, mod_type = 'MC', mini_batch_size = 256):
         
         t = torch.rand((mini_batch_size))*self.env.N
@@ -200,7 +200,6 @@ class DDPG():
 
             return S
         
-
     def make_reward(self, batch_S, batch_S_p, batch_I, I_p):
 
         q = I_p-batch_I
@@ -420,9 +419,137 @@ class DDPG():
             plt.savefig("path_"  +self.name + "_" + name + ".pdf", format='pdf', bbox_inches='tight')
             plt.show()
 
-            return r
+            return r, S, I
+        
         if no_plots == True:
             return r    
+
+    def run_strategy_rolling(self, name=datetime.now().strftime("%H_%M_%S"), N=12, no_plots=False):
+        S = torch.zeros((1, N+2)).float()         
+        I = torch.zeros((1, N+2)).float()
+        r = torch.zeros((1, N+2)).float()
+        theta_post = torch.zeros((1, N+2)).float()
+    
+        S = self.obtain_data(mini_batch_size=1, N=N, train=False)
+    
+        for t in range(N-self.seq_length):
+            theta_post = self.get_theta(S[:, t:t+self.seq_length+1])
+    
+            X = self.__stack_state__(S[:, t+self.seq_length-1].T, I[:, t+self.seq_length-1].T, theta_post)
+    
+            I[:, t+self.seq_length] = self.pi['net'](X).reshape(-1).detach().unsqueeze(-1)
+    
+            r[:, t+1] = self.make_reward(S[:,t+self.seq_length-1], 
+                                         S[:,t+self.seq_length],
+                                         I[:,t+self.seq_length-1], 
+                                         I[:,t+self.seq_length])
+    
+        I = I.detach().numpy()
+        r = r.detach().numpy()
+    
+        if not no_plots:
+            a = self.env.dt * np.arange(0, N) / self.env.T
+            time_step = 100  # Length of each time frame
+            t = np.arange(0, N-(self.seq_length + 2))#a[:-(self.seq_length + 2)]  
+            max_t = t[-1]
+            for start_t in range(int(max_t) - time_step + 1):  # Iterate one time step at a time
+                end_t = start_t + time_step
+                if end_t > max_t:
+                    break
+                
+                t_snapshot = t[start_t:end_t]
+                S_snapshot = S[:, self.seq_length + start_t:self.seq_length + end_t].squeeze(0).numpy()
+                I_snapshot = I[:, self.seq_length + start_t:self.seq_length + end_t].squeeze(0)
+    
+                plt.figure(figsize=(5, 5))
+                fig, ax1 = plt.subplots()
+    
+                ax1.plot(t_snapshot, S_snapshot, label='Stock price')
+                ax1.set_ylabel('Stock price')
+                ax1.set_ylim(self.env.S_0 - 5 * self.env.inv_vol, self.env.S_0 + 5 * self.env.inv_vol)
+                ax1.set_xlabel('Time')
+                ax1.legend(loc='upper left')
+    
+                ax2 = ax1.twinx()
+                ax2.plot(t_snapshot, I_snapshot, color='red', label='Inventory')
+                ax2.set_ylim(-self.I_max / 2, self.I_max / 2)         
+                ax2.set_ylabel('Inventory')
+                ax2.legend(loc='upper right')
+    
+                plt.title(f"Stock price and Inventory - t={start_t} to t={end_t}")
+                plt.savefig(f"path_{int(start_t)}.png", format='png', bbox_inches='tight')
+                plt.show()
+    
+        return r, S, I
+        
+
+    def run_strategy_rolling_gif(self, name=datetime.now().strftime("%H_%M_%S"), N=12, no_plots=False):
+        S = torch.zeros((1, N+2)).float()         
+        I = torch.zeros((1, N+2)).float()
+        r = torch.zeros((1, N+2)).float()
+        theta_post = torch.zeros((1, N+2)).float()
+    
+        S = self.obtain_data(mini_batch_size=1, N=N, train=False)
+    
+        for t in range(N-self.seq_length):
+            theta_post = self.get_theta(S[:, t:t+self.seq_length+1])
+    
+            X = self.__stack_state__(S[:, t+self.seq_length-1].T, I[:, t+self.seq_length-1].T, theta_post)
+    
+            I[:, t+self.seq_length] = self.pi['net'](X).reshape(-1).detach().unsqueeze(-1)
+    
+            r[:, t+1] = self.make_reward(S[:,t+self.seq_length-1], 
+                                         S[:,t+self.seq_length],
+                                         I[:,t+self.seq_length-1], 
+                                         I[:,t+self.seq_length])
+    
+        I = I.detach().numpy()
+        r = r.detach().numpy()
+    
+        if no_plots == False:
+            a = self.env.dt * np.arange(0, N) / self.env.T
+            time_step = 100  # Length of each time frame
+            t = np.arange(0, N-(self.seq_length + 2))#a[:-(self.seq_length + 2)]  
+            max_t = t[-1]
+            
+            fig, ax1 = plt.subplots(figsize=(5, 5))
+            ax2 = ax1.twinx()
+            lines = [ax1.plot([], [], label='Stock price')[0], ax2.plot([], [], color='red', label='Inventory')[0]]
+            
+            def init():
+                ax1.set_xlabel('Time')
+                ax1.set_ylabel('Stock price')
+                ax1.set_ylim(self.env.S_0 - 5 * self.env.inv_vol, self.env.S_0 + 5 * self.env.inv_vol)
+                ax1.legend(loc='upper left')
+                ax2.set_ylim(-self.I_max/2, self.I_max/2)
+                ax2.set_ylabel('Inventory')
+                ax2.legend(loc='upper right')
+                return lines
+            
+            def update(frame):
+                start_t = frame
+                end_t = min(start_t + time_step, max_t)
+    
+                t_snapshot = t[start_t:end_t]
+                S_snapshot = S[:, self.seq_length + start_t:self.seq_length + end_t].squeeze(0).numpy()
+                I_snapshot = I[:, self.seq_length + start_t:self.seq_length + end_t].squeeze(0)
+    
+                lines[0].set_data(t_snapshot, S_snapshot)
+                lines[1].set_data(t_snapshot, I_snapshot)
+                ax1.set_xlim(t_snapshot[0], t_snapshot[-1])
+                plt.title(f"Stock price and Inventory - t={start_t} to t={end_t}")
+                return lines
+
+            ani = FuncAnimation(fig, update, frames=range(0, round(max_t), time_step), init_func=init, blit=True)
+            
+            video_path = f'strategy_animation_{name}.gif'  # Save as GIF
+            writer = PillowWriter(fps=2)
+            ani.save(video_path, writer=writer)
+            plt.close(fig)
+            return r, S, I
+        
+        if no_plots == True:
+            return r
     
     
     def plot_policy(self, name=""):
@@ -480,10 +607,3 @@ class DDPG():
         plt.xlabel("Price")
         plt.ylabel("Inventory")
         plt.show()
-
-
-
-
-
-
-

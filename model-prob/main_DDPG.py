@@ -42,10 +42,35 @@ ddpg = DDPG(env, gru = model, I_max = 10,
 #%%
 import torch
 ddpg.pi['net'].load_state_dict(torch.load('pi.pth'))
-r = ddpg.run_strategy(N=1000)
+r, S, I = ddpg.run_strategy(N=1000)
 ddpg.plot_policy()
 # %%
-import numpy as np
+r, S, I = ddpg.run_strategy_rolling(N=1000)
+
+# %%
+# t = N#
+a = env.dt*np.arange(0, env.N)/env.T
+t = a[:-(ddpg.seq_length + 2)]
+plt.figure(figsize=(5,5))
+n_paths = 3
+fig, axs = plt.subplots(n_paths, 1, figsize=(10, 15))
+for i in range(0,len(t),10):
+    plt.plot((S[:,i:i+50]).squeeze(0).numpy(), label='Stock price')
+    #plt.set_ylabel('Stock price')
+    #plt.set_xlabel('Time')
+    plt.legend(loc='upper left')
+    #ax2 = axs[i].twinx()
+    plt.plot((I[:,i:i+50]).squeeze(0), color='red', label='Inventory')
+    #plt.set_ylabel('Inventory')
+    plt.legend(loc='upper right')
+plt.title("Stock price and Inventory")
+plt.show()
+# %%
+S[:,i:i+100].squeeze(0).numpy()
+
+
+#%%
+
 num_it = 500
 num_steps=  1002
 r = np.load('r.npy')
