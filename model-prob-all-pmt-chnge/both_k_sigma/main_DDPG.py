@@ -16,33 +16,29 @@ os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
 
 model = gru_pred(T=40, 
                  learning_rate = 0.001,
-                 seq_length=10, n_ahead=1, 
-                 dropout_rate=0, kappa=5, sigma=0.3, dt=0.2)
+                 seq_length=20, n_ahead=1, 
+                 dropout_rate=0, kappa=[3, 7], theta=[0.9, 1, 1.1], sigma=[0.3, 0.1], dt=0.2)
 
 env = MR_env(S_0 = model.env.S_0 , kappa = model.env.kappa, sigma = model.env.sigma, theta = model.env.theta,
              dt = model.env.dt, T = model.env.T, 
              I_max = 10, lambd = 0.05)
 
-#gru = gru_pred(T = env.T, dt = env.dt, learning_rate = 0.001,
-#                 seq_length = 10, n_ahead = 1, 
-#                 dropout_rate = 0, kappa = env.kappa, sigma = env.sigma, batch_size = 16)
-
 ddpg = DDPG(env, gru = model, I_max = 10,
             gamma = 0.999, 
             lr= 0.001,
-            n_nodes=16, n_layers=5, 
+            n_nodes=20, n_layers=6, # n_layers=6 andava già un po' meglio
             name="test" )
 
 # %%        
-#ddpg.train(n_iter=10_000, n_iter_Q = 1, n_iter_pi = 5, n_plot=100, mini_batch_size=512)
-
-#import torch
-#torch.save(ddpg.pi['net'].state_dict(), 'pi.pth')
-#torch.save(ddpg.Q_main['net'].state_dict(), 'Q.pth')
+ddpg.train(n_iter=10_000, n_iter_Q = 1, n_iter_pi = 5, n_plot=100, mini_batch_size=512)
+# %%
+import torch
+torch.save(ddpg.pi['net'].state_dict(), 'pi_1.pth')
+torch.save(ddpg.Q_main['net'].state_dict(), 'Q_1.pth')
 #%%
 import torch
-ddpg.pi['net'].load_state_dict(torch.load('pi.pth'))
-r, S, I = ddpg.run_strategy(N=1000)
+ddpg.pi['net'].load_state_dict(torch.load('pi_1.pth'))
+r, S, I = ddpg.run_strategy(N=2000)
 ddpg.plot_policy()
 # %%
 r, S, I = ddpg.run_strategy_rolling(N=1000)
@@ -70,15 +66,15 @@ S[:,i:i+100].squeeze(0).numpy()
 
 
 #%%
-
+import numpy as np
 num_it = 500
-num_steps=  1002
-r = np.load('r.npy')
+num_steps=  2002
+#r = np.load('r.npy')
 
-#r = np.zeros((num_it, num_steps))
-#for i in range(num_it):
-#    r[i, ...] = ddpg.run_strategy(N=num_steps - 2, no_plots=  True)
-# np.save('r.npy', r)
+r = np.zeros((num_it, num_steps))
+for i in range(num_it):
+    r[i, ...] = ddpg.run_strategy(N=num_steps - 2, no_plots=  True)
+np.save('r_1.npy', r)
 # %%
 import seaborn as sns
 sns.histplot(r[:, :-12].sum(axis=1), bins = 51, kde=True)

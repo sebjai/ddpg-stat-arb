@@ -76,7 +76,7 @@ class gru_pred():
                  decay_rate=0.99,
                  seed = 10002197,
                  kappa=[1, 5, 10],
-                 sigma=0.1,
+                 sigma=[0.3, 0.1],
                  theta=[0.9, 1, 1.1]): # torch.tensor([0.8000, 1.0000, 1.2000])
 
         np.random.seed(seed)  
@@ -109,14 +109,16 @@ class gru_pred():
         
     def grab_data(self, batch_size):
         
-        S, _, theta, kappa = self.env.Randomize_Start('MC', batch_size)
+        S, _, theta, kappa, sigma = self.env.Randomize_Start('MC', batch_size)
         x_norm = S #(S - self.a)/self.b
         
         x, y = self.create_snippets(x_norm, theta)
         
         xx,k = self.create_snippets(x_norm, kappa)
 
-        return x, y, k
+        zz,s = self.create_snippets(x_norm, sigma)
+
+        return x, y, k, s
     
     def create_snippets(self, x, theta=None):
         
@@ -222,7 +224,7 @@ class gru_pred():
         for epoch in tqdm(range(num_epochs)):
             
             # Forward pass
-            x, y, k = self.grab_data(1)
+            x, y, k, s = self.grab_data(1)
 
             outputs = self.model(x)
             ell = nn.CrossEntropyLoss()
@@ -268,7 +270,7 @@ class gru_pred():
 
     def pred(self):
         
-        x, y, kappa = self.grab_data(1)
+        x, y, kappa, sigma = self.grab_data(1)
         t = self.env.t[:-self.n_ahead-self.seq_length]
         
         lg = nn.Softmax(dim=1)
@@ -313,6 +315,26 @@ class gru_pred():
         ax2.legend(loc='upper left', bbox_to_anchor=(-0.43, 1))
         ax.set_ylabel(r'$S_t$')
         ax2.set_ylabel(r'$\kappa_{t}$')
-        fig.text(0.5, 0.01, r'The possible levels for $\kappa$ are: $\kappa^{(0)}$ = 1, $\kappa^{(1)}$ = 5, $\kappa^{(2)}$ = 10 ', ha='center')
+        fig.text(0.5, 0.01, r'The possible levels for $\kappa$ are: $\kappa^{(0)}$ = 3, $\kappa^{(1)}$ = 7', ha='center')
+        
+        plt.show()
+
+        ###########################################################################
+        fig  = plt.figure()
+        ax = fig.add_subplot(111)
+        ax2 = ax.twinx()
+        
+        ax.plot(t, x[:,-1,0], label=r'$S_t$', color='k')
+
+        ax2.plot(t, sigma, label=r"$\sigma_{t}$", color='tab:red')#+n
+            
+        
+        
+        plt.xlabel(r"$t$")
+        ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1))
+        ax2.legend(loc='upper left', bbox_to_anchor=(-0.43, 1))
+        ax.set_ylabel(r'$S_t$')
+        ax2.set_ylabel(r'$\sigma_{t}$')
+        fig.text(0.5, 0.01, r'The possible levels for $\sigma$ are: $\sigma^{(0)}$ = 0.1, $\sigma^{(1)}$ = 0.3', ha='center')
         
         plt.show()

@@ -4,7 +4,7 @@ Created on Mon May  13 13:39:56 2024
 
 @author: macrandrea
 """
-from MR_env import MR_env as Environment
+from MR_env_ddpg import MR_env as Environment
 from gru_pred import gru_pred as RNN
 import numpy as np
 import matplotlib.pyplot as plt
@@ -177,7 +177,7 @@ class DDPG():
 
     def obtain_data(self, mini_batch_size = 256, N =  12, train = True):
             
-        S, _, theta_true = self.env.Simulate(s0=self.env.S_0 + 3*self.env.inv_vol*torch.randn(mini_batch_size, ), 
+        S, _, theta_true, kappa, sigma = self.env.Simulate(s0=self.env.S_0 + 3*self.env.start_inv_vol*torch.randn(mini_batch_size, ), 
                                              i0=self.I_max * (2*torch.rand(mini_batch_size)-1), 
                                              model = 'MC', batch_size=mini_batch_size, ret_reward = False, 
                                              I_p = 0, N = N)
@@ -554,8 +554,8 @@ class DDPG():
     
     def plot_policy(self, name=""):
         NS = 101
-        S = torch.linspace(self.env.S_0 - 5*self.env.inv_vol,
-                           self.env.S_0 + 5*self.env.inv_vol,
+        S = torch.linspace(self.env.S_0 - 5*self.env.start_inv_vol,
+                           self.env.S_0 + 5*self.env.start_inv_vol,
                            NS)
         NI = 101
         I = torch.linspace(-self.I_max/2, self.I_max/2, NI)
@@ -566,8 +566,8 @@ class DDPG():
                              levels=np.linspace(-self.I_max/2, self.I_max/2, 21),
                              cmap='RdBu')
             ax.axvline(self.env.S_0, linestyle='--', color='g')
-            ax.axvline(self.env.S_0-2*self.env.inv_vol, linestyle='--', color='k')
-            ax.axvline(self.env.S_0+2*self.env.inv_vol, linestyle='--', color='k')
+            ax.axvline(self.env.S_0-2*self.env.start_inv_vol, linestyle='--', color='k')
+            ax.axvline(self.env.S_0+2*self.env.start_inv_vol, linestyle='--', color='k')
             ax.axhline(0, linestyle='--', color='k')
             ax.axhline(self.I_max/2, linestyle='--', color='k')
             ax.axhline(-self.I_max/2, linestyle='--', color='k')
