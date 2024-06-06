@@ -357,13 +357,15 @@ class DDPG():
         S = torch.zeros((1, N+2)).float()         
         I = torch.zeros((1, N+2)).float()
         r = torch.zeros((1, N+2)).float()
-        theta_post = torch.zeros((1, N+2)).float()
+        theta_post_m = torch.zeros((N-self.seq_length, 3)).float()
 
         S = self.obtain_data(mini_batch_size   =  1, N = N, train = False)
 
         for t in range(N-self.seq_length):
 
-            theta_post = self.get_theta(S[:, t:t+self.seq_length+1])
+            theta_post= self.get_theta(S[:, t:t+self.seq_length+1])
+
+            theta_post_m[t, :] = theta_post
 
             X = self.__stack_state__(S[:, t+self.seq_length-1].T, I[:, t+self.seq_length-1].T, theta_post)
 
@@ -419,9 +421,15 @@ class DDPG():
             plt.savefig("path_"  +self.name + "_" + name + ".pdf", format='pdf', bbox_inches='tight')
             plt.show()
 
-            return r, S, I
+            S = S.detach().numpy()
+            
+            theta_post_m = theta_post_m.detach().numpy()
+
+
+            return r, S, I, theta_post_m
         
         if no_plots == True:
+
             return r    
 
     def run_strategy_rolling(self, name=datetime.now().strftime("%H_%M_%S"), N=12, no_plots=False):

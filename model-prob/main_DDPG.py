@@ -42,10 +42,17 @@ ddpg = DDPG(env, gru = model, I_max = 10,
 #%%
 import torch
 ddpg.pi['net'].load_state_dict(torch.load('pi.pth'))
-r, S, I = ddpg.run_strategy(N=1000)
+r, S, I, theta_post = ddpg.run_strategy(N=2000)
 ddpg.plot_policy()
+import numpy as np
+np.save('S.npy', S)
+np.save('I.npy', I)
+np.save('theta_post.npy', theta_post)
+
 # %%
-r, S, I = ddpg.run_strategy_rolling(N=1000)
+theta_post
+
+#r, S, I = ddpg.run_strategy_rolling(N=2000)
 
 # %%
 # t = N#
@@ -66,19 +73,28 @@ for i in range(0,len(t),10):
 plt.title("Stock price and Inventory")
 plt.show()
 # %%
-S[:,i:i+100].squeeze(0).numpy()
 
+r,s,i,t=ddpg.run_strategy(N=2000-2)
+#%%
+t.shape
 
 #%%
+import numpy as np
+num_it = 5
+num_steps=  2002
+#r = np.load('r.npy')
 
-num_it = 500
-num_steps=  1002
-r = np.load('r.npy')
+r = np.zeros((num_it, num_steps-2))
+S = np.zeros((num_it, num_steps-2))
+I = np.zeros((num_it, num_steps-2))
+theta_post = np.zeros((num_it, num_steps, 3))
+for i in range(num_it):
+    r[i, ...], S[i, :], I[i, 2:], _  = ddpg.run_strategy(N=num_steps-2)
+np.save('r_1.npy', r)
+np.save('S_1.npy', S)
+np.save('I_1.npy', I)
+np.save('theta_post_1.npy', theta_post)
 
-#r = np.zeros((num_it, num_steps))
-#for i in range(num_it):
-#    r[i, ...] = ddpg.run_strategy(N=num_steps - 2, no_plots=  True)
-# np.save('r.npy', r)
 # %%
 import seaborn as sns
 sns.histplot(r[:, :-12].sum(axis=1), bins = 51, kde=True)
@@ -171,6 +187,7 @@ S = ddpg.obtain_data(mini_batch_size   =  1, N = 1000, train = False)
 # %%
 import numpy as np
 np.save('S.npy', S)
+np.save('I.npy', I)
 # %%
 
 S, _, theta_true = env.Simulate(s0=1, 

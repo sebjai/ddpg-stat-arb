@@ -30,16 +30,20 @@ ddpg = DDPG(env, gru = model, I_max = 10,
             name="test" )
 
 # %%        
-ddpg.train(n_iter=10_000, n_iter_Q = 1, n_iter_pi = 5, n_plot=100, mini_batch_size=512)
+#ddpg.train(n_iter=10_000, n_iter_Q = 1, n_iter_pi = 5, n_plot=100, mini_batch_size=512)
 # %%
-import torch
-torch.save(ddpg.pi['net'].state_dict(), 'pi_1.pth')
-torch.save(ddpg.Q_main['net'].state_dict(), 'Q_1.pth')
+#import torch
+#torch.save(ddpg.pi['net'].state_dict(), 'pi_1.pth')
+#torch.save(ddpg.Q_main['net'].state_dict(), 'Q_1.pth')
 #%%
 import torch
 ddpg.pi['net'].load_state_dict(torch.load('pi_1.pth'))
-r, S, I = ddpg.run_strategy(N=2000)
+r, S, I, theta_post = ddpg.run_strategy(N=2000)
 ddpg.plot_policy()
+import numpy as np
+np.save('S.npy', S)
+np.save('I.npy', I)
+np.save('theta_post.npy', theta_post)
 # %%
 r, S, I = ddpg.run_strategy_rolling(N=1000)
 

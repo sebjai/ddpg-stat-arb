@@ -38,10 +38,20 @@ ddpg = DDPG(env, gru = model, I_max = 10,
 #%%
 import torch
 ddpg.pi['net'].load_state_dict(torch.load('pi.pth'))
-r, S, I = ddpg.run_strategy(N=1000)
+r, S, I = ddpg.run_strategy(N=2000)
 ddpg.plot_policy()
+import numpy as np
+np.save('S.npy', S)
+np.save('I.npy', I)
 # %%
-r, S, I = ddpg.run_strategy_rolling(N=1000)
+import torch
+ddpg.pi['net'].load_state_dict(torch.load('pi.pth'))
+r, S, I, theta_post = ddpg.run_strategy(N=2000)
+ddpg.plot_policy()
+import numpy as np
+np.save('S.npy', S)
+np.save('I.npy', I)
+np.save('theta_post.npy', theta_post)
 
 # %%
 # t = N#
@@ -68,7 +78,7 @@ S[:,i:i+100].squeeze(0).numpy()
 #%%
 import numpy as np
 num_it = 500
-num_steps=  1002
+num_steps=  2002
 #r = np.load('r.npy')
 
 r = np.zeros((num_it, num_steps))
