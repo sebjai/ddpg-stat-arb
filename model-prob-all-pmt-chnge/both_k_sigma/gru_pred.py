@@ -20,7 +20,9 @@ class gru(nn.Module):
     def __init__(self, input_size, gru_hidden_size, gru_num_layers, output_size, 
                  lin_hidden_size=128, 
                  dropout_rate=0.0):
+        
         super(gru, self).__init__()
+        
         self.hidden_size = gru_hidden_size
         self.gru = nn.GRU(input_size, gru_hidden_size, num_layers=gru_num_layers, batch_first=True)
         self.dropout = nn.Dropout(dropout_rate)
