@@ -20,19 +20,25 @@ import numpy as np
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from matplotlib.animation import FuncAnimation, PillowWriter
 
-class ANN_GRU(nn.Module):
+class ANN(nn.Module):
 
     def __init__(self, n_in, n_out, nNodes, nLayers, nNodes_gru, layers_gru, activation='silu', out_activation=None, scale=1):
 
-        super(ANN_GRU, self).__init__()
+        super(ANN, self).__init__()
+
+        self.n_in = n_in
 
         # GRU layer
-        self.gru = nn.GRU(input_size=n_in, hidden_size=nNodes_gru, num_layers=layers_gru, batch_first=True)
+        self.gru = nn.GRU(input_size=1, hidden_size=nNodes_gru, num_layers=layers_gru, batch_first=True)
 
         self.prop_in_to_h = nn.Linear(nNodes, nNodes)
 
         # modulelist informs pytorch that these have parameters 
         # that you need to compute gradients of
+        self.prop_h_lin = nn.Linear(n_in, nNodes)
+
+        self.prop_lin_to_h = nn.Linear(nNodes, n_out)
+
         self.prop_h_to_h = nn.ModuleList([nn.Linear(nNodes, nNodes) for _ in range(nLayers)])
 
         self.prop_h_to_out = nn.Linear(nNodes, n_out)
@@ -51,17 +57,32 @@ class ANN_GRU(nn.Module):
         # x should be of shape (batch_size, sequence_length, n_in)
         
         # Passing through GRU
-        gru_out, _ = self.gru(x)  # gru_out shape: (batch_size, sequence_length, nNodes)
         
-        # Use only the last output of the GRU
-        h = gru_out[:, -1, :]  # shape: (batch_size, nNodes)
+        if self.n_in>2:
+
+            gru_out, _ = self.gru(x[0].unsqueeze(-1))  # gru_out shape: (batch_size, sequence_length, nNodes)
         
+            # Use only the last output of the GRU
+            hx = self.prop_lin_to_h(gru_out[:, -1, :])  # shape: (batch_size, nNodes)
+            
+            h = torch.cat((hx, x[1][:,-1].unsqueeze(-1), x[2]), axis=-1)
+
+        else:
+
+            gru_out, _ = self.gru(x[0].unsqueeze(-1))  # gru_out shape: (batch_size, sequence_length, nNodes)
+        
+            # Use only the last output of the GRU
+            hx = self.prop_lin_to_h(gru_out[:, -1, :])  # shape: (batch_size, nNodes)
+            
+            h = torch.cat((hx, x[1][:,-1].unsqueeze(-1)), axis=-1)
+
+        h = self.g(self.prop_h_lin(h))
+
         # Input into hidden layer
         h = self.g(self.prop_in_to_h(h))
 
         # Hidden layer to hidden layer
         
-
         for prop in self.prop_h_to_h:
             h = self.g(prop(h))
 
@@ -74,51 +95,7 @@ class ANN_GRU(nn.Module):
         y = self.scale * y
 
         return y
-    
-class ANN(nn.Module):
 
-    def __init__(self, n_in, n_out, nNodes, nLayers, 
-                 activation='silu', out_activation=None,
-                 scale = 1):
-        super(ANN, self).__init__()
-        
-        self.prop_in_to_h = nn.Linear(n_in, nNodes)
-
-        # modulelist informs pytorch that these have parameters 
-        # that you need to compute gradients of
-        self.prop_h_to_h = nn.ModuleList(
-            [nn.Linear(nNodes, nNodes) for i in range(nLayers-1)])
-
-        self.prop_h_to_out = nn.Linear(nNodes, n_out)
-        
-        if activation == 'silu':
-            self.g = nn.SiLU()
-        elif activation == 'relu':
-            self.g = nn.ReLU()
-        elif activation == 'sigmoid':
-            self.g= torch.sigmoid()
-        
-        self.out_activation = out_activation
-        self.scale = scale
-
-    def forward(self, x):
-
-        # input into  hidden layer
-        h = self.g(self.prop_in_to_h(x))
-
-        for prop in self.prop_h_to_h:
-            h = self.g(prop(h))
-
-        # hidden layer to output layer
-        y = self.prop_h_to_out(h)
-
-        if self.out_activation == 'tanh':
-            y = torch.tanh(y)
-            
-        y = self.scale * y 
-
-        return y
-    
 class DDPG():
 
     def __init__(self, env: Environment, gru: None , I_max=10, 
@@ -159,7 +136,7 @@ class DDPG():
         #
         # features = S, I
         #
-        self.pi = {'net': ANN_GRU(n_in=2, 
+        self.pi = {'net': ANN(n_in=2, 
                               n_out=1, 
                               nNodes=self.n_nodes, 
                               nLayers=self.n_layers,
@@ -178,7 +155,9 @@ class DDPG():
         self.Q_main = {'net' : ANN(n_in=3, 
                                   n_out=1,
                                   nNodes=self.n_nodes, 
-                                  nLayers=self.n_layers) }
+                                  nLayers=self.n_layers,
+                                  nNodes_gru = 20, 
+                                  layers_gru = 5) }
 
         self.Q_main['optimizer'], self.Q_main['scheduler'] = self.__optim_and_scheduler__(self.Q_main)
         self.Q_target = copy.deepcopy(self.Q_main)
@@ -203,7 +182,6 @@ class DDPG():
         
         t = torch.rand((mini_batch_size))*self.env.N
         S, I, theta_true = self.env.Randomize_Start(type_mod = mod_type, batch_size = mini_batch_size)
-        # da qui escono già come snippets
 
         return t, S, I
     
@@ -241,7 +219,7 @@ class DDPG():
         
         if train == True:   
 
-            return S, I, theta_true
+            return S, I
         
         else:
 
@@ -267,49 +245,55 @@ class DDPG():
 
         for i in range(n_iter_Q):
 
-            batch_S, batch_I, _ = self.obtain_data(mini_batch_size, N = self.env.N+1)
+            batch_S, batch_I = self.obtain_data(mini_batch_size, N = self.env.N+1)
+           
+            self.Q_main['optimizer'].zero_grad()
 
-            for t in range(self.seq_length, self.env.N-self.n_ahead):
+            # concatenate states
+            #X = self.__stack_state__(
+            #                        batch_S[:, :self.seq_length], 
+            #                        batch_I[:, :self.seq_length],
+            #                        )
             
-                self.Q_main['optimizer'].zero_grad()
+            ex = [(batch_S[:, :self.seq_length]/self.env.S_0-1.0), batch_I[:, :self.seq_length]/self.I_max]
 
-                # concatenate states
-                X = self.__stack_state__(
-                                        batch_S[:, t-self.seq_length+1:t], 
-                                        batch_I[:, t-self.seq_length+1:t],
-                                        )
 
-                I_p = self.pi['net'](X).detach() * torch.exp(-0.5*epsilon**2+epsilon*torch.randn((batch_S.shape[0], 1)))
+            I_p = self.pi['net'](ex).detach() * torch.exp(-0.5*epsilon**2+epsilon*torch.randn(batch_S.shape[0],1))
 
-                #input diverso per la rete Q? alla fine a me interessa valutare I_{t+1} dato S_t e I_t
+            ex_q = [batch_S[:, :self.seq_length], batch_I[:, :self.seq_length], I_p/self.I_max]
 
-                Q = self.Q_main['net']( torch.cat((batch_S[:, t].unsqueeze(-1), batch_I[:, t].unsqueeze(-1), I_p/self.I_max), axis = -1)) 
-                # step in the environment
-                r = self.make_reward(batch_S[:, t  ], 
-                                     batch_S[:, t+1], 
-                                     batch_I[:, t  ], 
-                                     I_p)
+            Q = self.Q_main['net']( ex_q )#torch.cat((X, I_p/self.I_max),axis=-1)
 
-                # compute the Q(S', a*)
-                X_p = self.__stack_state__(batch_S[:, :, t-self.seq_length+1:t+1], I_p.squeeze(-1))   
+            # step in the environment
+            r = self.make_reward(batch_S[:, self.seq_length], 
+                                 batch_S[:, self.seq_length+1], 
+                                 batch_I[:, self.seq_length], I_p.squeeze(-1))
 
-                # optimal policy at t+1
-                I_pp = self.pi['net'](X_p).detach()
+            # compute the Q(S', a*)
+            #X_p = self.__stack_state__(batch_S[:, :self.seq_length], I_p.squeeze(-1))   
 
-                # compute the target for Q
-                target = r + self.gamma * self.Q_target['net'](torch.cat((X_p, I_pp/self.I_max), axis=1))
+            ex_p = [(batch_S[:, :self.seq_length+1]/self.env.S_0-1.0), I_p/self.I_max]
 
-                loss = torch.mean((target.detach() - Q)**2)
+            # optimal policy at t+1
+            I_pp = self.pi['net'](ex_p).detach()
 
-                loss.backward()
+            ex_pp_q = [(batch_S[:, :self.seq_length]/self.env.S_0-1.0), 
+                       batch_I[:, :self.seq_length]/self.I_max,
+                       I_pp/self.I_max]
+            # compute the target for Q
+            target = r + self.gamma * self.Q_target['net'](ex_pp_q)
 
-                # perform step using those gradients
-                self.Q_main['optimizer'].step()                
-                self.Q_main['scheduler'].step() 
+            loss = torch.mean((target.detach() - Q)**2)
 
-                self.Q_loss.append(loss.item())
+            loss.backward()
 
-                self.soft_update( self.Q_main['net'], self.Q_target['net'])
+            # perform step using those gradients
+            self.Q_main['optimizer'].step()                
+            self.Q_main['scheduler'].step() 
+
+            self.Q_loss.append(loss.item())
+
+            self.soft_update( self.Q_main['net'], self.Q_target['net'])
         
     def soft_update(self, main, target):
     
@@ -319,30 +303,27 @@ class DDPG():
     def Update_pi(self, mini_batch_size=256, epsilon=0.02, n_iter_pi=10):
 
         for i in range(n_iter_pi):
+            
+            batch_S, batch_I = self.obtain_data(mini_batch_size, N = self.env.N+1)
 
-            batch_S, batch_I, _ = self.obtain_data(mini_batch_size, N = self.env.N+1)
+            self.pi['optimizer'].zero_grad()
 
-            for t in range(self.seq_length, self.env.N-self.n_ahead):
+            ex = [(batch_S[:, :self.seq_length]/self.env.S_0-1.0), batch_I[:, :self.seq_length]/self.I_max]
 
-                self.pi['optimizer'].zero_grad()
+            I_p = self.pi['net'](ex)#.detach() * torch.exp(-0.5*epsilon**2+epsilon*torch.randn(batch_S.shape[0],1))
+            
+            ex_q = [batch_S[:, :self.seq_length], batch_I[:, :self.seq_length], I_p/self.I_max]
 
-                X = self.__stack_state__(
-                                        batch_S[:, t-self.seq_length+1:t], 
-                                        batch_I[:, t-self.seq_length+1:t],
-                                        )
+            Q = self.Q_main['net']( ex_q )
 
-                I_p = self.pi['net'](X)
-
-                Q = self.Q_main['net']( torch.cat((batch_S[:, t], batch_I[:, t], I_p/self.I_max)) ) 
-
-                loss = -torch.mean(Q)# -
-
-                loss.backward()
-
-                self.pi['optimizer'].step()
-                self.pi['scheduler'].step()
-
-                self.pi_loss.append(loss.item())
+            loss = -torch.mean(Q)# -
+                
+            loss.backward()
+            
+            self.pi['optimizer'].step()
+            self.pi['scheduler'].step()
+           
+            self.pi_loss.append(loss.item())
 
     def train(self, n_iter=1_000, n_iter_Q= 1, n_iter_pi = 10, mini_batch_size=256, n_plot=100):
         C = 100
@@ -415,16 +396,20 @@ class DDPG():
 
         S = self.obtain_data(mini_batch_size   =  1, N = N, train = False)
 
-        for t in range(N-self.seq_length):
+        for t in range(self.seq_length, N-self.seq_length):
 
-            X = self.__stack_state__(S[:, t+self.seq_length-1].T, I[:, t+self.seq_length-1].T)
+            #X = self.__stack_state__(S[:, t+self.seq_length-1].T, I[:, t+self.seq_length-1].T)
 
-            I[:, t+self.seq_length] = self.pi['net'](X).reshape(-1).detach().unsqueeze(-1)
+            ex = [(S[:, :t]/self.env.S_0-1.0), I[:, :t]/self.I_max]
 
-            r[:, t+1] = self.make_reward(S[:,t+self.seq_length-1], 
-                                         S[:,t+self.seq_length],
-                                         I[:,t+self.seq_length-1], 
-                                         I[:,t+self.seq_length])
+
+
+            I[:, t] = self.pi['net'](ex).reshape(-1).detach().unsqueeze(-1)
+
+            r[:, t+1] = self.make_reward(S[:,t-1], 
+                                         S[:,t  ],
+                                         I[:,t-1], 
+                                         I[:,t  ])
 
         I  =    I.detach().numpy()
         r =     r.detach().numpy()
