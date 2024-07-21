@@ -31,7 +31,7 @@ class MR_env():
         
         self.dt = dt  # time steps
         self.T = T
-        self.N = 10_000#int(self.T/self.dt)+1
+        self.N = int(self.T/self.dt)+1
         self.t = np.linspace(0,self.T, self.N)
         
         self.inv_vol = self.sigma/np.sqrt(2.0*self.kappa)

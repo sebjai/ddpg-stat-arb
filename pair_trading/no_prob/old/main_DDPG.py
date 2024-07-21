@@ -14,41 +14,38 @@ os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
 model = gru_pred(T=100, 
                  learning_rate = 0.001,
                  seq_length=100, n_ahead=1, 
-                 gru_hidden_size = 5, gru_num_layers = 5,
-                 dropout_rate=0, kappa=5, sigma=0.3, dt=0.1, theta=[-1.,1.])
+                 gru_hidden_size = 10, gru_num_layers = 10,
+                 dropout_rate=0, kappa=5, sigma=0.3, dt=0.1)
 
 env = MR_env(S_0 = model.env.S_0 , kappa = model.env.kappa, sigma = model.env.sigma, theta = model.env.theta,
              dt = model.env.dt, T = model.env.T, 
              I_max = 10, lambd = 0.05)
 
-ddpg = DDPG(env, gru = model, I_max = env.I_max,
+ddpg = DDPG(env, gru = model, I_max = 10,
             gamma = 0.999, 
             lr= 0.001,
             n_nodes=20, n_layers=10, 
             name="test" )
 
 # %%        
-ddpg.train(n_iter=5_000, n_iter_Q = 1, n_iter_pi = 5, n_plot=1000, mini_batch_size=64)
-# %%
-import torch
-torch.save(ddpg.pi['net'].state_dict(), 'pi.pth')
-torch.save(ddpg.Q_main['net'].state_dict(), 'Q.pth')
+ddpg.train(n_iter=10_000, n_iter_Q = 1, n_iter_pi = 1, n_plot=200, mini_batch_size=64)
+
+#import torch
+#torch.save(ddpg.pi['net'].state_dict(), 'pi.pth')
+#torch.save(ddpg.Q_main['net'].state_dict(), 'Q.pth')
 #%%
 import torch
 ddpg.pi['net'].load_state_dict(torch.load('pi.pth'))
-r, S, I, theta_post = ddpg.run_strategy(N=12000)
-#ddpg.plot_policy()
+r, S, I, theta_post = ddpg.run_strategy(N=2000)
+ddpg.plot_policy()
 import numpy as np
 np.save('S.npy', S)
 np.save('I.npy', I)
 np.save('theta_post.npy', theta_post)
-np.save('r.npy', r)
+
 # %%
-plt.plot(S[0,:]* 0.45 +126);
+theta_post
 
-
-#%%
-plt.plot(np.cumsum(r[0,1:-103]) * 0.45 +126);
 #r, S, I = ddpg.run_strategy_rolling(N=2000)
 
 # %%
@@ -73,69 +70,49 @@ plt.show()
 
 r,s,i,t=ddpg.run_strategy(N=2000-2)
 #%%
-r.shape
+t.shape
 
 #%%
-num_it = 100
-num_steps = 10_000
-#r = np.zeros((num_it, num_steps))
-#S = np.zeros((num_it, num_steps))
-#I = np.zeros((num_it, num_steps))
-theta_post = torch.zeros((num_it, num_steps, 2)).to('cuda')
-r = []
-S = []
-I = []  
+import numpy as np
+num_it = 5
+num_steps=  2002
+#r = np.load('r.npy')
 
+r = np.zeros((num_it, num_steps-2))
+S = np.zeros((num_it, num_steps-2))
+I = np.zeros((num_it, num_steps-2))
+theta_post = np.zeros((num_it, num_steps, 3))
 for i in range(num_it):
-    a = ddpg.run_strategy(N=num_steps-2, no_plots=True)
-    r.append(a)#, S.append(b), I.append(c)
-np.save('r_1.npy', np.array(r))
-np.save('S_1.npy', np.array(S))
-np.save('I_1.npy', np.array(I))
-np.save('theta_post_1.npy', theta_post.cpu().numpy())
+    r[i, ...], S[i, :], I[i, 2:], _  = ddpg.run_strategy(N=num_steps-2)
+np.save('r_1.npy', r)
+np.save('S_1.npy', S)
+np.save('I_1.npy', I)
+np.save('theta_post_1.npy', theta_post)
 
 # %%
 import seaborn as sns
-r = np.load('r_1.npy')
-r.reshape(-1, 10000).shape
 sns.histplot(r[:, :-12].sum(axis=1), bins = 51, kde=True)
 plt.title('Histogram of rewards for 1000 episodes')
-#plt.axvline (r[:, :-12].sum(axis=1).mean(), color='r', linestyle='-', label = 'mean')
-#plt.axvline (r[:, :-12].sum(axis=1).mean() + r[:, :-12].sum(axis=1).std(), color='r', linestyle='--', label = 'std')
-#plt.axvline (r[:, :-12].sum(axis=1).mean() - r[:, :-12].sum(axis=1).std(), color='r', linestyle='--')
-#plt.axvline (r[:, :-12].sum(axis=1).mean() + 2*r[:,: -12].sum(axis=1).std(), color='r', linestyle='-.')
-#plt.axvline (r[:, :-12].sum(axis=1).mean() - 2*r[:,: -12].sum(axis=1).std(), color='r', linestyle='-.', label = r'2$\times$std')
+plt.axvline (r[:, :-12].sum(axis=1).mean(), color='r', linestyle='-', label = 'mean')
+plt.axvline (r[:, :-12].sum(axis=1).mean() + r[:, :-12].sum(axis=1).std(), color='r', linestyle='--', label = 'std')
+plt.axvline (r[:, :-12].sum(axis=1).mean() - r[:, :-12].sum(axis=1).std(), color='r', linestyle='--')
+plt.axvline (r[:, :-12].sum(axis=1).mean() + 2*r[:,: -12].sum(axis=1).std(), color='r', linestyle='-.')
+plt.axvline (r[:, :-12].sum(axis=1).mean() - 2*r[:,: -12].sum(axis=1).std(), color='r', linestyle='-.', label = r'2$\times$std')
 plt.axvline(np.median(r[:, :-12].sum(axis=1)), color='b', linestyle='-.', label='median')
 plt.axvline(0, color='g')
 plt.legend()
 plt.show()
 
-
-#%%
 t = np.arange(num_it - 12)
 for i in range(1, num_it):
-    plt.plot(r[i, :- 102], linewidth=1, alpha=0.5)
-plt.plot(r[0, :- 102], color='k', linewidth=1)
+    plt.plot(np.cumsum(r[i, :- 12], axis = 0), linewidth=1, alpha=0.5)
+plt.plot(np.cumsum(r[0, :- 12], axis = 0), color='k', linewidth=1)
 plt.title('Cumulative rewards for 1000 episodes')
 plt.xlabel('Time')
 
 plt.show()
 #%%
-r = np.load('r_1.npy')
-r = r.reshape(10, 10000,1)
-#%%
 
-plt.hist(r.sum(0), bins = 51)
-plt.axvline (r.sum(0).mean(), color='r', linestyle='-', label = 'mean')
-#%%
-t = np.arange(num_it - 12)
-for i in range(1, num_it):
-    plt.plot(np.cumsum(r[i, :- 102]), linewidth=1, alpha=0.5)
-plt.plot(np.cumsum(r[0, :- 102]), color='k', linewidth=1)
-plt.title('Cumulative rewards for 1000 episodes')
-plt.xlabel('Time')
-
-plt.show()
 #%%
 import numpy as np
 import torch

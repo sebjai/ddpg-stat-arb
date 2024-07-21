@@ -102,30 +102,24 @@ class DDPG():
         
         self.env = env
 
-        self.media= 126.57226336032578
-        self.stdde = 0.4580139732622294
-
-        self.max = 127.54331436135412
-        self.min = 125.94022338360779
-
     def __initialize_NNs__(self):
         
         # policy approximation
         #
-        # features = S, I, theta_estim_1, theta_estim_2
+        # features = S, I
         #
         self.pi = {'net': ANN(n_in=2, 
                               n_out=1, 
                               nNodes=self.n_nodes, 
                               nLayers=self.n_layers,
-                              out_activation='tanh',#tanhrelu
+                              out_activation='tanh',
                               scale=self.I_max)}
         
         self.pi['optimizer'], self.pi['scheduler'] = self.__optim_and_scheduler__(self.pi)        
         
         # Q - function approximation
         #
-        # features = S, I, a=Ip, theta_estim_1, theta_estim_2
+        # features = S, I, a=Ip
         #
         self.Q_main = {'net' : ANN(n_in=3, 
                                   n_out=1,
@@ -145,11 +139,20 @@ class DDPG():
     
         return optimizer, scheduler
     
-    def __stack_state__(self, S, I):
+    def __stack_state__(self, S, I, theta_estim):
 
         return torch.cat((
-            (S).unsqueeze(-1).to(device), #(2*(S - self.min)/(self.max-self.min)-1).unsqueeze(-1).to(device), 
-            (I/self.I_max  ).unsqueeze(-1).to(device)), axis=1)
+            (S).unsqueeze(-1).to(device), 
+            (I/self.I_max  ).unsqueeze(-1).to(device), 
+            theta_estim.to(device)), axis=1)
+  
+    #def __grab_mini_batch__(self, mod_type = 'MC', mini_batch_size = 256):
+    #    
+    #    t = torch.rand((mini_batch_size))*self.env.N
+    #    S, I, theta_true = self.env.Randomize_Start(type_mod = mod_type, batch_size = mini_batch_size)
+    #    # da qui escono già come snippets
+#
+    #    return t, S, I, theta_true
     
     def create_snippets(self, x, theta=None):
         
@@ -176,12 +179,11 @@ class DDPG():
 
     def obtain_data(self, mini_batch_size = 256, N =  12, train = True):
             
-        data = np.load('matrix.npy')
-
-        if train == True:
-            data = data[:33_000]
-        else:
-            data = data[33_000:]
+        #S, _, theta_true = self.env.Simulate(s0=self.env.S_0 + 3*self.env.inv_vol*torch.randn(mini_batch_size, ), 
+        #                                     i0=self.I_max * (2*torch.rand(mini_batch_size)-1), 
+        #                                     model = 'MC', batch_size=mini_batch_size, ret_reward = False, 
+        #                                     I_p = 0, N = N)
+        data = np.load('matrix.npy')[30_000:]
         S = torch.zeros((mini_batch_size, N), device=device).float()
 
         idx = np.random.randint(0, len(data) - N - mini_batch_size)   
@@ -189,36 +191,32 @@ class DDPG():
         for i in range(mini_batch_size):
             S[i, :] = torch.tensor(data[idx+i:idx+i+N, 0], device=device).float()
 
-        self.S_0 = data[0, 0] 
+        self.S_0 = S[0, 0]
         #print(idx)
 
         I = self.I_max * (2*torch.rand(mini_batch_size, N)-1).to(device).float()
 
-        #if train == True:   
-#
-        #    snip, _ = self.create_snippets(S[:,:self.seq_length+self.n_ahead].T)
-#
-        #    theta_pred = self.lg(self.gru.model(snip.transpose(0,2).to(device)).detach().squeeze())
-#
-        #    snip_p, _ = self.create_snippets(S[:,1:self.seq_length+self.n_ahead +1].T)
-        #    
-        #    theta_pred_p = self.lg(self.gru.model(snip_p.transpose(0,2).to(device)).detach().squeeze())
-#
-        return S, I#, theta_pred, theta_pred_p
+        if train == True:   
+
+            snip, _ = self.create_snippets(S[:,:self.seq_length+self.n_ahead].T)
+
+            theta_pred = self.lg(self.gru.model(snip.transpose(0,2).to(device) ).detach().squeeze())
+
+            snip_p, _ = self.create_snippets(S[:,1:self.seq_length+self.n_ahead +1].T)
+            
+            theta_pred_p = self.lg(self.gru.model(snip_p.transpose(0,2).to(device) ).detach().squeeze())
+
+            return S, I, theta_pred, theta_pred_p
         
-        #else:
-#
-        #    return S
+        else:
+
+            return S
         
     def make_reward(self, batch_S, batch_S_p, batch_I, I_p):
 
         q = I_p-batch_I
 
-        batch_S = batch_S + 1# * 0.45984051451935737 + 126.61320843438816
-
-        batch_S_p = batch_S_p + 1# * 0.45984051451935737 + 126.61320843438816
-
-        r = I_p * (batch_S_p - batch_S) - self.env.lambd*torch.abs(q) # / (batch_S)torch.sign(I_p)*(torch.abs(batch_S_p)-torch.abs(batch_S)) - self.env.lambd*torch.abs(q)#
+        r = I_p*(batch_S_p-batch_S) - self.env.lambd*torch.abs(q)
 
         return r
     
@@ -226,7 +224,7 @@ class DDPG():
 
         snip, _ = self.create_snippets(S[:,:self.seq_length+self.n_ahead].T)
 
-        theta_pred = self.lg(self.gru.model(snip.transpose(0,2).to(device)).detach())
+        theta_pred = self.lg(self.gru.model(snip.transpose(0,2).to(device) ).detach())
 
         return theta_pred
 
@@ -234,13 +232,13 @@ class DDPG():
 
         for i in range(n_iter_Q):
             
-            batch_S, batch_I = self.obtain_data(mini_batch_size, N = self.env.N+1)
+            batch_S, batch_I, theta_estim, theta_estim_p = self.obtain_data(mini_batch_size, N = self.env.N+1)
 
             self.Q_main['optimizer'].zero_grad()
     
             # concatenate states
-            X = self.__stack_state__(batch_S[:,self.seq_length-1]+1, 
-                                     batch_I[:,self.seq_length-1]) 
+            X = self.__stack_state__(batch_S[:,self.seq_length-1], 
+                                     batch_I[:,self.seq_length-1], theta_estim=theta_estim) 
             
             I_p = self.pi['net'].to(device)(X).detach() * torch.exp(-0.5*epsilon**2+epsilon*torch.randn(batch_S.shape[0],1)).to(device)
     
@@ -252,7 +250,7 @@ class DDPG():
                                  batch_I[:, self.seq_length-1], I_p)
 
             # compute the Q(S', a*)
-            X_p = self.__stack_state__(batch_S[:, self.seq_length]+1, I_p.squeeze(-1))   
+            X_p = self.__stack_state__(batch_S[:, self.seq_length], I_p.squeeze(-1), theta_estim_p)   
 
             # optimal policy at t+1
             I_pp = self.pi['net'].to(device)(X_p).detach()
@@ -281,12 +279,13 @@ class DDPG():
 
         for i in range(n_iter_pi):
             
-            batch_S, batch_I = self.obtain_data(mini_batch_size, N = self.env.N+1)
+            batch_S, batch_I, theta_estim, _ = self.obtain_data(mini_batch_size, N = self.env.N+1)
 
             self.pi['optimizer'].zero_grad()
 
-            X = self.__stack_state__(batch_S[:,self.seq_length-1]+1, 
-                                     batch_I[:,self.seq_length-1]) 
+            X = self.__stack_state__(batch_S[:,self.seq_length-1], 
+                                     batch_I[:,self.seq_length-1], theta_estim=theta_estim  
+                                     ) 
         
             I_p = self.pi['net'].to(device)(X)
             
@@ -304,13 +303,16 @@ class DDPG():
     def train(self, n_iter=1_000, n_iter_Q= 1, n_iter_pi = 10, mini_batch_size=256, n_plot=100):
         C = 100
         D = 100
+
+        epsilon = 1
+        tau = 0.995
         
         if len(self.epsilon)==0:
             self.count=0
 
         for i in tqdm(range(n_iter)):
 
-            epsilon = np.maximum(C/(D+self.count), 0.02)
+            # np.maximum(C/(D+self.count), 0.02)
             self.epsilon.append(epsilon)
             self.count += 1
 
@@ -321,7 +323,9 @@ class DDPG():
             if np.mod(i+1,n_plot) == 0:
                 
                 self.loss_plots()
-                self.run_strategy(name= datetime.now().strftime("%H_%M_%S"), N = 10000)
+                self.run_strategy(name= datetime.now().strftime("%H_%M_%S"), N = 1000)
+                epsilon *= tau
+                print(epsilon)
 
     def moving_average(self, x, n):
         
@@ -371,17 +375,17 @@ class DDPG():
         r = torch.zeros((1, N+2), device= device).float()
         theta_post_m = torch.zeros((N-self.seq_length, 2), device= device).float()
 
-        S, _ = self.obtain_data(mini_batch_size   =  1, N = N, train = False)
+        S = self.obtain_data(mini_batch_size   =  1, N = N, train = False)
 
         for t in range(N-self.seq_length):
 
-            #theta_post= self.get_theta(S[:, t:t+self.seq_length+1])
+            theta_post= self.get_theta(S[:, t:t+self.seq_length+1])
 
-            #theta_post_m[t, :] = theta_post
+            theta_post_m[t, :] = theta_post
 
-            X = self.__stack_state__(S[:, t+self.seq_length-1].T + 1, I[:, t+self.seq_length-1].T)
+            X = self.__stack_state__(S[:, t+self.seq_length-1].T, I[:, t+self.seq_length-1].T, theta_post)
 
-            I[:, t+self.seq_length] = self.pi['net'].to(device)(X).reshape(-1).detach().unsqueeze(-1)
+            I[:, t+self.seq_length] = self.pi['net'](X).reshape(-1).detach().unsqueeze(-1)
 
             r[:, t+1] = self.make_reward(S[:,t+self.seq_length-1], 
                                          S[:,t+self.seq_length],
@@ -390,6 +394,7 @@ class DDPG():
 
         I  =    I.detach().cpu().numpy()
         r =     r.detach().cpu().numpy()
+
 
         if no_plots == False:
             # t = N#
@@ -403,7 +408,7 @@ class DDPG():
             #plt.subplot(2,1, 1)
             fig, ax1 = plt.subplots()
 
-            ax1.plot((S[:,self.seq_length:-2]* 0.45984051451935737 + 126.61320843438816).squeeze(0).cpu().numpy(), label = 'Stock price')
+            ax1.plot((S[:,self.seq_length:-2]).squeeze(0).cpu().numpy(), label = 'Stock price')
             ax1.set_ylabel('Stock price')
             ax1.set_xlabel('Time')
             ax1.legend(loc='upper left')
@@ -429,14 +434,13 @@ class DDPG():
             #plt.title("histogram of returns")
             plt.tight_layout()
         
-            #plt.savefig("path_"  +self.name + "_" + name + ".pdf", format='pdf', bbox_inches='tight')
+            plt.savefig("path_"  +self.name + "_" + name + ".pdf", format='pdf', bbox_inches='tight')
             plt.show()
-
-            print(f"cumulative return: {np.sum(np.cumsum(r.squeeze(0)))}")
 
             S = S.detach().cpu().numpy()
             
             theta_post_m = theta_post_m.detach().cpu().numpy()
+
 
             return r, S, I, theta_post_m
         

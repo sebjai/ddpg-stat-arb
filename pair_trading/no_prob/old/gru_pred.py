@@ -79,7 +79,7 @@ class gru_pred():
                  seed = 10002197,
                  kappa=1,
                  sigma=0.1,
-                 theta=[-1., 1.]): # torch.tensor([0.8000, 1.0000, 1.2000])
+                 theta=[0.13295848, 0.70665083]): # torch.tensor([0.8000, 1.0000, 1.2000])
 
         np.random.seed(seed)  
         torch.manual_seed(seed)
@@ -91,8 +91,8 @@ class gru_pred():
         self.n_ahead = n_ahead
         
 
-        #self.media = 0.8396093049272507
-        #self.stdde = 0.5736923492212687
+        #self.media= 126.57226336032578
+        #self.stdde = 0.4580139732622294
         #self.find_normalization()
         
         self.early_stopping = early_stopping(patience=500)
@@ -117,7 +117,7 @@ class gru_pred():
     def grab_data(self, batch_size):
         S, _, theta = self.env.Randomize_Start(batch_size)
         x_norm = S
-        z_score = lambda x: (x - self.media) / (self.stdde)
+        #z_score = lambda x: (x - self.media) / (self.stdde)
         #x_norm = z_score(S)
 
         #x_norm = (S - S.mean())/S.std()

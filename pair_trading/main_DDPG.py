@@ -11,7 +11,7 @@ from gru_pred import gru_pred
 import os
 os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
 
-model = gru_pred(T=100, 
+model = gru_pred(T=20, 
                  learning_rate = 0.001,
                  seq_length=100, n_ahead=1, 
                  gru_hidden_size = 5, gru_num_layers = 5,
@@ -24,28 +24,45 @@ env = MR_env(S_0 = model.env.S_0 , kappa = model.env.kappa, sigma = model.env.si
 ddpg = DDPG(env, gru = model, I_max = env.I_max,
             gamma = 0.999, 
             lr= 0.001,
-            n_nodes=20, n_layers=10, 
+            n_nodes=10, n_layers=5, 
             name="test" )
 
-# %%        
-ddpg.train(n_iter=10_000, n_iter_Q = 1, n_iter_pi = 1, n_plot=500, mini_batch_size=512)
+#%%
+ddpg.train(n_iter=10_000, n_iter_Q = 1, n_iter_pi = 5, n_plot=500, mini_batch_size=64)
 # %%
 import torch
 torch.save(ddpg.pi['net'].state_dict(), 'pi.pth')
 torch.save(ddpg.Q_main['net'].state_dict(), 'Q.pth')
 #%%
-#import torch
-#ddpg.pi['net'].load_state_dict(torch.load('pi.pth'))
-r, S, I, theta_post = ddpg.run_strategy(N=1200)
+import torch
+ddpg.pi['net'].load_state_dict(torch.load('pi.pth'))
+r, S, I, theta_post = ddpg.run_strategy(N=12000, )
 #ddpg.plot_policy()
 import numpy as np
 np.save('S.npy', S)
 np.save('I.npy', I)
 np.save('theta_post.npy', theta_post)
+np.save('r.npy', r)
 
 # %%
-I[:,:200]
 
+
+import numpy as np
+import matplotlib.pyplot as plt
+r = np.load('r.npy')
+S = np.load('S.npy')
+r.shape, S.shape
+
+#%%
+
+plt.plot(np.cumsum(r[0,1:-2003]) * 0.45 +126);
+
+#%%
+
+
+I.shape, S.shape
+#%%
+plt.plot(np.cumsum(r[0,1:-103]) * 0.45 +126);
 #r, S, I = ddpg.run_strategy_rolling(N=2000)
 
 # %%
@@ -74,7 +91,7 @@ r.shape
 
 #%%
 num_it = 500
-num_steps = 2000
+num_steps = 10_000
 #r = np.zeros((num_it, num_steps))
 #S = np.zeros((num_it, num_steps))
 #I = np.zeros((num_it, num_steps))
@@ -84,15 +101,25 @@ S = []
 I = []  
 
 for i in range(num_it):
-    a, b, c, d = ddpg.run_strategy(N=num_steps-2)
-    r.append(a), S.append(b), I.append(c)
+    a = ddpg.run_strategy(N=num_steps-2, no_plots=True)
+    r.append(a)#, S.append(b), I.append(c)
 np.save('r_1.npy', np.array(r))
 np.save('S_1.npy', np.array(S))
 np.save('I_1.npy', np.array(I))
 np.save('theta_post_1.npy', theta_post.cpu().numpy())
 
+
+r = np.load('r_1.npy').reshape(num_it, num_steps)
+
+plt.hist(r.sum(0), bins = 51)
+plt.axvline (r.sum(0).mean(), color='r', linestyle='-', label = 'mean')
+
+
+
 # %%
 import seaborn as sns
+r = np.load('r_1.npy')
+r.reshape(-1, 10000).shape
 sns.histplot(r[:, :-12].sum(axis=1), bins = 51, kde=True)
 plt.title('Histogram of rewards for 1000 episodes')
 plt.axvline (r[:, :-12].sum(axis=1).mean(), color='r', linestyle='-', label = 'mean')
@@ -105,15 +132,47 @@ plt.axvline(0, color='g')
 plt.legend()
 plt.show()
 
+
+#%%
 t = np.arange(num_it - 12)
 for i in range(1, num_it):
-    plt.plot(np.cumsum(r[i, :- 12], axis = 0), linewidth=1, alpha=0.5)
-plt.plot(np.cumsum(r[0, :- 12], axis = 0), color='k', linewidth=1)
+    plt.plot(np.cumsum(r[i, :- 102]), linewidth=1, alpha=0.5)
+plt.plot(np.cumsum(r[0, :- 102]), color='k', linewidth=1)
 plt.title('Cumulative rewards for 1000 episodes')
 plt.xlabel('Time')
 
 plt.show()
 #%%
+r = np.load('r_1.npy')
+r.shape
+#%%
+
+r = r.reshape(500, 200)
+#%%
+
+plt.hist(r.sum(0), bins = 51)
+plt.axvline (r.sum(0).mean(), color='r', linestyle='-', label = 'mean')
+#%%
+r.sum(0).mean()
+#%%
+def remove_outliers(data):
+    # Calculate the IQR (Interquartile Range)
+    Q1 = np.percentile(data, 10)
+    Q3 = np.percentile(data, 90)
+    IQR = Q3 - Q1
+
+    # Define lower and upper bounds to identify outliers
+    lower_bound = Q1 - 1.5 * IQR
+    upper_bound = Q3 + 1.5 * IQR
+
+    # Remove outliers
+    filtered_data = data[(data >= lower_bound) & (data <= upper_bound)]
+    return filtered_data
+
+
+#%%
+plt.hist(remove_outliers(r.sum(0)*0.45+126), bins=51)
+plt.axvline (remove_outliers(r.sum(0)).mean()*0.45+126, color='r', linestyle='-', label = 'mean')
 
 #%%
 import numpy as np

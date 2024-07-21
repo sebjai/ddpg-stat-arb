@@ -189,7 +189,13 @@ class DDPG():
         #                                     i0=self.I_max * (2*torch.rand(mini_batch_size)-1), 
         #                                     model = 'MC', batch_size=mini_batch_size, ret_reward = False, 
         #                                     I_p = 0, N = N)
-        data = np.load('matrix.npy')[30_000:]
+        data = np.load('matrix.npy')
+        
+        if train == True:
+            data = data[:33_000]
+        else:
+            data = data[33_000:]
+        
         S = torch.zeros((mini_batch_size, N), device=device).float()
 
         idx = np.random.randint(0, len(data) - N - mini_batch_size)   
@@ -197,6 +203,7 @@ class DDPG():
         for i in range(mini_batch_size):
             S[i, :] = torch.tensor(data[idx+i:idx+i+N, 0], device=device).float()
 
+        print(idx)
         self.S_0 = data[0, 0] 
         #print(idx)
 
@@ -222,9 +229,9 @@ class DDPG():
 
         q = I_p-batch_I
 
-        batch_S = batch_S# + 1# * 0.45984051451935737 + 126.61320843438816
+        batch_S = batch_S + 1# * 0.45984051451935737 + 126.61320843438816
 
-        batch_S_p = batch_S_p# + 1# * 0.45984051451935737 + 126.61320843438816
+        batch_S_p = batch_S_p +1 # * 0.45984051451935737 + 126.61320843438816
 
         r = I_p * (batch_S_p - batch_S) - self.env.lambd*torch.abs(q) # / (batch_S)torch.sign(I_p)*(torch.abs(batch_S_p)-torch.abs(batch_S)) - self.env.lambd*torch.abs(q)#
 
@@ -247,7 +254,7 @@ class DDPG():
             self.Q_main['optimizer'].zero_grad()
     
             # concatenate states
-            X = self.__stack_state__(batch_S[:,self.seq_length-1], 
+            X = self.__stack_state__(batch_S[:,self.seq_length-1]+1, 
                                      batch_I[:,self.seq_length-1],
                                      theta_estim) 
             
@@ -261,7 +268,7 @@ class DDPG():
                                  batch_I[:, self.seq_length-1], I_p)
 
             # compute the Q(S', a*)
-            X_p = self.__stack_state__(batch_S[:, self.seq_length], I_p.squeeze(-1), theta_estim_p)   
+            X_p = self.__stack_state__(batch_S[:, self.seq_length]+1, I_p.squeeze(-1), theta_estim_p)   
 
             # optimal policy at t+1
             I_pp = self.pi['net'].to(device)(X_p).detach()
@@ -294,7 +301,7 @@ class DDPG():
 
             self.pi['optimizer'].zero_grad()
 
-            X = self.__stack_state__(batch_S[:,self.seq_length-1], 
+            X = self.__stack_state__(batch_S[:,self.seq_length-1]+1, 
                                      batch_I[:,self.seq_length-1],  
                                      theta_estim) 
         
@@ -389,7 +396,7 @@ class DDPG():
 
             theta_post_m[t, :] = theta_post
 
-            X = self.__stack_state__(S[:, t+self.seq_length-1].T, I[:, t+self.seq_length-1].T, theta_post)
+            X = self.__stack_state__(S[:, t+self.seq_length-1].T + 1, I[:, t+self.seq_length-1].T, theta_post)
 
             I[:, t+self.seq_length] = self.pi['net'].to(device)(X).reshape(-1).detach().unsqueeze(-1)
 
@@ -442,7 +449,7 @@ class DDPG():
             #plt.savefig("path_"  +self.name + "_" + name + ".pdf", format='pdf', bbox_inches='tight')
             plt.show()
 
-            print(f"cumulative return: {np.cumsum(r.squeeze(0))[-1]}")
+            print(f"cumulative return: {np.sum(np.cumsum(r.squeeze(0)))}")
 
             S = S.detach().cpu().numpy()
             
