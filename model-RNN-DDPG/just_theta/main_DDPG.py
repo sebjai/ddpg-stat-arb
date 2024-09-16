@@ -20,7 +20,15 @@ ddpg = DDPG(env, gru = None, I_max = 10,
             name="test" )
 
 # %%        
-ddpg.train(n_iter=10_000, n_iter_Q = 1, n_iter_pi = 5, n_plot=500, mini_batch_size=512)
-# %%
-#cProfile.run('ddpg.train(n_iter=1000, n_iter_Q = 1, n_iter_pi = 1, n_plot=500, mini_batch_size=12)')
-# %%
+#ddpg.train(n_iter=10_000, n_iter_Q = 1, n_iter_pi = 5, n_plot=500, mini_batch_size=512)
+
+#%%
+import torch
+ddpg.pi['net'].load_state_dict(torch.load('pi.pth'))
+#ddpg.gru['net'].load_state_dict(torch.load('gru_layer.pth'))
+r, S, I = ddpg.run_strategy(N=2000)
+#ddpg.plot_policy()
+import numpy as np
+np.save('S.npy', S)
+np.save('I.npy', I)
+#%%

@@ -23,28 +23,30 @@ from matplotlib.animation import FuncAnimation, PillowWriter
 
 class gru(nn.Module):
     def __init__(self, input_size, gru_hidden_size, gru_num_layers, output_size, lin_hidden_size=128, dropout_rate=0.0):
-
         super(gru, self).__init__()
         self.hidden_size = gru_hidden_size
-        self.gru = nn.GRU(input_size, gru_hidden_size, num_layers=gru_num_layers, batch_first = True)
+        self.gru = nn.GRU(input_size, gru_hidden_size, num_layers=gru_num_layers, batch_first=True)
         self.dropout = nn.Dropout(dropout_rate)
-        self.fc1 = nn.Linear(gru_hidden_size*gru_num_layers, lin_hidden_size)
+        self.fc1 = nn.Linear(gru_hidden_size, lin_hidden_size)
         
-        self.prop_h_to_h = nn.ModuleList([nn.Linear(lin_hidden_size, lin_hidden_size) for n in range(5)])
+        self.prop_h_to_h = nn.ModuleList([nn.Linear(lin_hidden_size, lin_hidden_size) for n in range(10)])
         
         self.fc3 = nn.Linear(lin_hidden_size, output_size)  # Output linear layer
 
     def forward(self, x):
-        _, out = self.gru(x)
+        _, out = self.gru(x)  # out has shape (num_layers, batch, hidden_size)
 
-        out = F.silu(self.fc1(out.transpose(0,1).flatten(1,2)))
+        out = out[-1, :, :]  # Take the last hidden state from the GRU output (shape will be (batch, hidden_size))
+
+        out = F.relu(self.fc1(out))
         
         for prop in self.prop_h_to_h:
-            out = F.silu( prop(out))
-
-        out = self.fc3(out)
+            out = F.relu(prop(out))
         
-        return out
+        out = self.fc3(out)  # Now `out` has shape (batch, output_size)
+        out = out.squeeze(-1)  # Squeeze the last dimension to ensure output shape is (batch,)
+
+        return (out)
 
 class ANN(nn.Module):
 
@@ -214,7 +216,7 @@ class DDPG():
 
     def obtain_data(self, mini_batch_size = 256, N =  12, train = True):
             
-        S, _, theta_true = self.env.Simulate(s0=self.env.S_0 + 3*self.env.inv_vol*torch.randn(mini_batch_size, ), 
+        S, _, theta_true, kappa = self.env.Simulate(s0=self.env.S_0 + 3*self.env.start_inv_vol*torch.randn(mini_batch_size, ), 
                                              i0=self.I_max * (2*torch.rand(mini_batch_size)-1), 
                                              model = 'MC', batch_size=mini_batch_size, ret_reward = False, 
                                              I_p = 0, N = N)
@@ -255,7 +257,7 @@ class DDPG():
 
             S_gru, y = self.create_snippets(batch_S[:, : self.seq_length+1].T)
 
-            S = self.gru['net'](S_gru.transpose(0,2))#
+            S = self.gru['net'](S_gru.T/self.env.S_0-1.0)#
 
             self.Q_main['optimizer'].zero_grad()
 
@@ -275,7 +277,12 @@ class DDPG():
                                  batch_I[:, self.seq_length+1], I_p)
 
             # compute the Q(S', a*)
-            X_p = self.__stack_state__(batch_S[:, self.seq_length+self.n_ahead+1],
+
+            S_gru_p, y = self.create_snippets(batch_S[:, 1: self.seq_length+self.n_ahead+1].T)
+
+            S_p = self.gru['net'](S_gru_p.T/self.env.S_0-1.0)#
+            
+            X_p = self.__stack_state__(S_p.detach().squeeze(-1),
                                         I_p.squeeze(-1))   
 
             # optimal policy at t+1
@@ -314,7 +321,9 @@ class DDPG():
 
             S_gru, y = self.create_snippets(batch_S[:, : self.seq_length+1].T)
 
-            S = self.gru['net'](S_gru.transpose(0,2)).detach()
+            #self.gru['net'](S_[:, t: t+self.seq_length].unsqueeze(-1)).detach()
+
+            S = self.gru['net'](S_gru.T/self.env.S_0-1.0).detach()
 
             self.pi['optimizer'].zero_grad()
 
@@ -400,22 +409,25 @@ class DDPG():
 
     def run_strategy(self, name= datetime.now().strftime("%H_%M_%S"), N = 12, no_plots = False):
 
-        S = torch.zeros((1, N+2)).float()         
-        I = torch.zeros((1, N)).float()
+        #S = torch.zeros((1, N+2)).float()         
+        I = torch.zeros((1, N+12)).float()
         r = torch.zeros((1, N+2)).float()
 
-        S = self.obtain_data(mini_batch_size   =  1, N = N, train = False)
+        S_ = self.obtain_data(mini_batch_size   =  1, N = N, train = False)
 
-        for t in range(N-self.seq_length):
+        for t in range(N-self.seq_length-1):
 
-            X = self.__stack_state__(S[:, t+self.seq_length-1].T, I[:, t+self.seq_length-1].T)
+            S = self.gru['net'](S_[:, t: t+self.seq_length].unsqueeze(-1)).detach()
+            
 
-            I[:, t+self.seq_length] = self.pi['net'](X).reshape(-1).detach().unsqueeze(-1)
+            X = self.__stack_state__(S, I[:, t+self.seq_length].T)
 
-            r[:, t+1] = self.make_reward(S[:,t+self.seq_length-1], 
-                                         S[:,t+self.seq_length],
-                                         I[:,t+self.seq_length-1], 
-                                         I[:,t+self.seq_length])
+            I[:, t+self.seq_length+1] = self.pi['net'](X).reshape(-1).detach().unsqueeze(-1)
+
+            r[:, t+1] = self.make_reward(S_[:,t+self.seq_length], 
+                                         S_[:,t+self.seq_length+1],
+                                         I[:,t+self.seq_length], 
+                                         I[:,t+self.seq_length+1])
 
         I  =    I.detach().numpy()
         r =     r.detach().numpy()
@@ -428,7 +440,7 @@ class DDPG():
 
             fig, ax1 = plt.subplots()
 
-            ax1.plot((S[:,self.seq_length:-2]).squeeze(0).numpy(), label = 'Stock price')
+            ax1.plot((S_[:,self.seq_length:-2]).squeeze(0).numpy(), label = 'Stock price')
             ax1.set_ylabel('Stock price')
             ax1.set_xlabel('Time')
             ax1.legend(loc='upper left')
@@ -452,7 +464,7 @@ class DDPG():
             return r, S, I
         
         if no_plots == True:
-            return r    
+            return r , S, I  
 
     def run_strategy_rolling(self, name=datetime.now().strftime("%H_%M_%S"), N=12, no_plots=False):
         S = torch.zeros((1, N+2)).float()         
