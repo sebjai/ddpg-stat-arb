@@ -219,6 +219,7 @@ class DDPG():
         self.gru_loss = []
         self.pi_loss = []
         self.env = env
+        self.reward = []
 
     def __initialize_NNs__(self):
         # gru for stock price prediction 
@@ -242,8 +243,8 @@ class DDPG():
         self.pi = {'net': Pi_ANN(n_in=2, 
                               n_out=1, 
                               nNodes=self.n_nodes, 
-                              gru_hidden_size= 20,
-                              gru_num_layers=10,
+                              gru_hidden_size= 10,
+                              gru_num_layers=20,
                               nLayers=self.n_layers,
                               out_activation='tanh',
                               scale=self.I_max,
@@ -369,9 +370,11 @@ class DDPG():
             Q = self.Q_main['net'].to(device)(torch.cat((X, I_p.unsqueeze(-1).transpose(0,2)/self.I_max),axis=1) )
 
             # step in the environment
-            r = self.make_reward(batch_S[:, self.seq_length], 
-                                 batch_S[:, self.seq_length+1], 
+            r = self.make_reward(batch_S[:, self.seq_length-1], 
+                                 batch_S[:, self.seq_length], 
                                  batch_I, I_p)
+            
+            self.reward.append(r.cpu().detach().numpy())
 
             # compute the Q(S', a*)
 
@@ -394,6 +397,8 @@ class DDPG():
             self.Q_main['optimizer'].step()                
             self.Q_main['scheduler'].step() 
             self.Q_loss.append(loss.item())
+
+            
 
             self.soft_update(self.Q_main['net'], self.Q_target['net'])
         
@@ -449,6 +454,7 @@ class DDPG():
                 
                 self.loss_plots()
                 self.run_strategy(name= datetime.now().strftime("%H_%M_%S"), N = 500, no_plots = False)
+                np.save('reward.npy', self.reward)
 
     def moving_average(self, x, n):
         
@@ -503,14 +509,14 @@ class DDPG():
 
             #S = self.gru['net'](S_[:, t: t+self.seq_length].unsqueeze(-1)).detach()
             
-            X = self.__stack_state__(S[:, t:t+self.seq_length+self.n_ahead].T.unsqueeze(0), I[:, t].reshape(1,1,-1))
+            X = self.__stack_state__(S[:, t:t+self.seq_length].T.unsqueeze(0), I[:, t].reshape(1,1,-1))
 
             I[:, t+1] = self.pi['net'].to(device)(X.transpose(0,2)).reshape(-1).detach().unsqueeze(-1)
 
-            r[:, t] = self.make_reward( S[:,t+self.seq_length+self.n_ahead], 
-                                         S[:,t+self.seq_length+self.n_ahead+1],
-                                         I[:,t], 
-                                         I[:,t+1])
+            r[:, t] = self.make_reward( S[:,t+self.seq_length-1], 
+                                        S[:,t+self.seq_length],
+                                        I[:,t], 
+                                        I[:,t+1])
 
         I  =    I.detach().cpu().numpy()
         r =     r.detach().cpu().numpy()
