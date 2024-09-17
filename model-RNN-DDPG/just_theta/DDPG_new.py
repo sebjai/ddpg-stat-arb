@@ -227,8 +227,8 @@ class DDPG():
         # features = S
         #
         self.gru = {'net': gru(input_size=1,
-                                gru_hidden_size=10,
-                                gru_num_layers=20,
+                                gru_hidden_size=20,
+                                gru_num_layers=10,
                                 output_size=1,
                                 lin_hidden_size=128,
                                 dropout_rate=0.0)}  
@@ -243,8 +243,8 @@ class DDPG():
         self.pi = {'net': Pi_ANN(n_in=2, 
                               n_out=1, 
                               nNodes=self.n_nodes, 
-                              gru_hidden_size= 10,
-                              gru_num_layers=20,
+                              gru_hidden_size= 20,
+                              gru_num_layers=10,
                               nLayers=self.n_layers,
                               out_activation='tanh',
                               scale=self.I_max,
