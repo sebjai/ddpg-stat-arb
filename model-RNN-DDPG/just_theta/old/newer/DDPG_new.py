@@ -88,10 +88,10 @@ class Q_ANN(nn.Module):
         third_feature  = x[:,-1:,:] # Shape: [batch_size, 1, 1] next inventory level prices
 
         # Pass the first feature through the GRU
-        _, gru_out = self.gru(second_feature.transpose(2,0))  # Shape: [batch_size, 10, gru_hidden_size]
+        gru_out, _ = self.gru(second_feature.transpose(2,0))  # Shape: [batch_size, 10, gru_hidden_size]
 
         # Select the output of the last time step from the GRU
-        gru_out_last = self.fc(gru_out[-1, :, :])  # Shape: [batch_size, gru_hidden_size]
+        gru_out_last = self.fc(gru_out[:, -1, :])  # Shape: [batch_size, gru_hidden_size]
 
         # Expand the last time step output to match the shape of the second feature
         gru_out_last_expanded = gru_out_last.unsqueeze(1)  # Shape: [batch_size, 1, gru_hidden_size]
@@ -155,10 +155,10 @@ class Pi_ANN(nn.Module):
         second_feature = x[:,1:,:] # Shape: [batch_size, 10, 1] stock prices
 
         # Pass the first feature through the GRU
-        _, gru_out = self.gru(second_feature)  # Shape: [batch_size, 10, gru_hidden_size]
+        gru_out, _ = self.gru(second_feature)  # Shape: [batch_size, 10, gru_hidden_size]
 
         # Select the output of the last time step from the GRU
-        gru_out_last = self.fc(gru_out[-1, :, :])  # Shape: [batch_size, gru_hidden_size]
+        gru_out_last = self.fc(gru_out[:, -1, :])  # Shape: [batch_size, gru_hidden_size]
 
         # Expand the last time step output to match the shape of the second feature
         gru_out_last_expanded = gru_out_last.unsqueeze(1)  # Shape: [batch_size, 1, gru_hidden_size]
@@ -192,8 +192,6 @@ class DDPG():
                  n_nodes=36, n_layers=6, 
                  seq_length = 10,
                  n_ahead    = 1,
-                 gru_hidden_size= 20,
-                 gru_num_layers = 10,
                  lr=1e-3, sched_step_size = 50, tau=0.001, ######################################################################## era sched_step_size = 50, 150
                  name=""):
 
@@ -206,8 +204,7 @@ class DDPG():
         self.lr = lr
         self.seq_length = seq_length
         self.n_ahead    = n_ahead   
-        self.gru_hidden_size= gru_hidden_size
-        self.gru_num_layers = gru_num_layers 
+        #self.lg = nn.Softmax(dim=1)
         self.tau = tau
         
         self.__initialize_NNs__()
@@ -224,15 +221,14 @@ class DDPG():
         self.env = env
         self.reward = []
 
-
     def __initialize_NNs__(self):
         # gru for stock price prediction 
         #
         # features = S
         #
         self.gru = {'net': gru(input_size=1,
-                                gru_hidden_size=10,
-                                gru_num_layers=20,
+                                gru_hidden_size=20,
+                                gru_num_layers=10,
                                 output_size=1,
                                 lin_hidden_size=128,
                                 dropout_rate=0.0)}  
@@ -247,8 +243,8 @@ class DDPG():
         self.pi = {'net': Pi_ANN(n_in=2, 
                               n_out=1, 
                               nNodes=self.n_nodes, 
-                              gru_hidden_size= self.gru_hidden_size,
-                              gru_num_layers = self.gru_num_layers,
+                              gru_hidden_size= 20,
+                              gru_num_layers=10,
                               nLayers=self.n_layers,
                               out_activation='tanh',
                               scale=self.I_max,
@@ -263,8 +259,8 @@ class DDPG():
         self.Q_main = {'net' : Q_ANN(n_in=3, 
                                   n_out=1,
                                   nNodes=self.n_nodes, 
-                                  gru_hidden_size= self.gru_hidden_size,
-                                  gru_num_layers = self.gru_num_layers,
+                                  gru_hidden_size= 20,
+                                  gru_num_layers=10,
                                   nLayers=self.n_layers,
                                   out_activation='tanh',
                                   scale=self.I_max,) }
@@ -355,7 +351,7 @@ class DDPG():
 
         for i in range(n_iter_Q):
 
-            batch_S, batch_I = self.obtain_data(mini_batch_size, N = self.seq_length+3)
+            batch_S, batch_I = self.obtain_data(mini_batch_size, N = 13)
 
             #self.gru['net'].zero_grad()
 
@@ -391,7 +387,7 @@ class DDPG():
             I_pp = self.pi['net'].to(device)(X_p.transpose(0,2)).detach()
 
             # compute the target for Q
-            target = r + self.gamma * self.Q_target['net'].to(device)(torch.cat((X_p, I_pp.unsqueeze(1).transpose(0,2)/self.I_max),axis=1))
+            target = r + self.gamma * self.Q_target['net'].to(device)(torch.cat((X_p, (I_pp.unsqueeze(1).transpose(0,2)/self.I_max)),axis=1))
             
             loss = torch.mean((target.detach() - Q)**2)
 
@@ -415,7 +411,7 @@ class DDPG():
 
         for i in range(n_iter_pi):
             
-            batch_S, batch_I = self.obtain_data(mini_batch_size, N = self.seq_length+3)
+            batch_S, batch_I = self.obtain_data(mini_batch_size, N = 13)
 
             S_gru, _ = self.create_snippets(batch_S[:, : self.seq_length+1].T)
 
@@ -509,14 +505,14 @@ class DDPG():
 
         S = self.obtain_data(mini_batch_size   =  1, N = N, train = False)
 
-        for t in range(N-self.seq_length):
+        for t in range(N-self.seq_length-2):
 
             #S = self.gru['net'](S_[:, t: t+self.seq_length].unsqueeze(-1)).detach()
             
             X = self.__stack_state__(S[:, t:t+self.seq_length].T.unsqueeze(0), I[:, t].reshape(1,1,-1))
 
-            I[:, t+1] = self.pi['net'].to(device)(X.transpose(0,2)).reshape(-1).detach().unsqueeze(-1) #torch.normal(0.0, 2.0, (1,1))#
-            
+            I[:, t+1] = self.pi['net'].to(device)(X.transpose(0,2)).reshape(-1).detach().unsqueeze(-1)
+
             r[:, t] = self.make_reward( S[:,t+self.seq_length-1], 
                                         S[:,t+self.seq_length],
                                         I[:,t], 
@@ -533,13 +529,13 @@ class DDPG():
 
             fig, ax1 = plt.subplots()
 
-            ax1.plot((S[:,self.seq_length:-self.seq_length + 2]).squeeze(0).numpy(), label = 'Stock price')
+            ax1.plot((S[:,self.seq_length:-12]).squeeze(0).numpy(), label = 'Stock price')
             ax1.set_ylabel('Stock price')
             ax1.set_xlabel('Time')
             ax1.legend(loc='upper left')
 
             ax2 = ax1.twinx()
-            ax2.plot((I[:,self.seq_length:-self.seq_length *2]).squeeze(0), color='red', label = 'Inventory', alpha=0.5)
+            ax2.plot((I[:,self.seq_length:-15]).squeeze(0), color='red', label = 'Inventory', alpha=0.5)
             ax2.set_ylabel('Inventory')
             ax2.legend(loc='upper right')
 
