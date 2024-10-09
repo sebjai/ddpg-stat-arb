@@ -4,13 +4,13 @@ Created on Mon May  13 13:39:56 2024
 
 @author: macrandrea
 """
-from MR_env_ddpg import MR_env as Environment
+from MR_env import MR_env as Environment
+from gru_pred import gru_pred as RNN
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
 import torch.optim as optim
 import torch.nn as nn
-import torch.nn.functional as F
 from tqdm import tqdm
 import copy
 from datetime import datetime
@@ -22,35 +22,6 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from matplotlib.animation import FuncAnimation, PillowWriter
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-class gru(nn.Module):
-    def __init__(self, input_size, gru_hidden_size, gru_num_layers, output_size, lin_hidden_size=128, dropout_rate=0.0):
-        super(gru, self).__init__()
-        self.hidden_size = gru_hidden_size
-        self.gru = nn.GRU(input_size, gru_hidden_size, num_layers=gru_num_layers, batch_first=True)
-        self.dropout = nn.Dropout(dropout_rate)
-        self.fc1 = nn.Linear(gru_hidden_size, lin_hidden_size)
-        
-        self.prop_h_to_h = nn.ModuleList([nn.Linear(lin_hidden_size, lin_hidden_size) for n in range(10)])
-        
-        self.fc3 = nn.Linear(lin_hidden_size, output_size)  # Output linear layer
-
-    def forward(self, x):
-        _, out = self.gru(x)  # out has shape (num_layers, batch, hidden_size)
-
-        out = out[-1, :, :]  # Take the last hidden state from the GRU output (shape will be (batch, hidden_size))
-
-        out = F.relu(self.fc1(out))
-        
-        for prop in self.prop_h_to_h:
-            out = F.relu(prop(out))
-        
-        out = self.fc3(out)  # Now `out` has shape (batch, output_size)
-        out = out.squeeze(-1)  # Squeeze the last dimension to ensure output shape is (batch,)
-
-        return (out)
-
-###################
 
 class Q_ANN(nn.Module):
 
@@ -83,15 +54,15 @@ class Q_ANN(nn.Module):
         # Print the shape of x for debugging
         # print(f"Input x shape: {x.shape}")
         
-        first_feature  = x[:,:1,:] # Shape: [batch_size, 1, 1] inventory
-        second_feature = x[:,1:-1,:] # Shape: [batch_size, 10, 1] stock prices
-        third_feature  = x[:,-1:,:] # Shape: [batch_size, 1, 1] next inventory level prices
+        first_feature  = x[:,:1] # Shape: [batch_size, 1, 1] inventory
+        second_feature = x[:,1:-1] # Shape: [batch_size, 10, 1] stock prices
+        third_feature  = x[:,-1:] # Shape: [batch_size, 1, 1] next inventory level prices
 
         # Pass the first feature through the GRU
-        _, gru_out = self.gru(second_feature.transpose(2,0))  # Shape: [batch_size, 10, gru_hidden_size]
+        gru_out, _ = self.gru(second_feature.unsqueeze(-1))#self.gru(second_feature.transpose(2,0))  # Shape: [batch_size, 10, gru_hidden_size]
 
         # Select the output of the last time step from the GRU
-        gru_out_last = self.fc(gru_out[-1, :, :])  # Shape: [batch_size, gru_hidden_size]
+        gru_out_last = self.fc(gru_out[:, -1, :])  # Shape: [batch_size, gru_hidden_size]
 
         # Expand the last time step output to match the shape of the second feature
         gru_out_last_expanded = gru_out_last.unsqueeze(1)  # Shape: [batch_size, 1, gru_hidden_size]
@@ -100,10 +71,10 @@ class Q_ANN(nn.Module):
         #second_feature = second_feature[:, :, 0:]  # Ensure it has the last dimension as 1
 
         # Combine GRU output with the second feature
-        combined_input = torch.cat((gru_out_last_expanded.transpose(0,2), first_feature, third_feature), dim=0)
+        combined_input = torch.cat((gru_out_last_expanded, first_feature.unsqueeze(-1), third_feature.unsqueeze(-1)), dim=1)
 
         # Process through the rest of the network
-        h = self.g(self.prop_in_to_h(combined_input[:, -1, :].T))  # Only using the last time step
+        h = self.g(self.prop_in_to_h(combined_input.squeeze(-1)))  # Only using the last time step
 
         for prop in self.prop_h_to_h:
             h = self.g(prop(h))
@@ -118,7 +89,6 @@ class Q_ANN(nn.Module):
 
         return y
 
-####################
 
 class Pi_ANN(nn.Module):
 
@@ -151,11 +121,11 @@ class Pi_ANN(nn.Module):
         # Print the shape of x for debugging
         # print(f"Input x shape: {x.shape}")
         
-        first_feature  = x[:,:1,:] # Shape: [batch_size, 1, 1] inventory
-        second_feature = x[:,1:,:] # Shape: [batch_size, 10, 1] stock prices
+        first_feature  = x[:1, :] # Shape: [batch_size, 1, 1] inventory
+        second_feature = x[1:, :] # Shape: [batch_size, 10, 1] stock prices
 
         # Pass the first feature through the GRU
-        _, gru_out = self.gru(second_feature)  # Shape: [batch_size, 10, gru_hidden_size]
+        gru_out, _ = self.gru(second_feature.unsqueeze(-1))  # Shape: [batch_size, 10, gru_hidden_size]
 
         # Select the output of the last time step from the GRU
         gru_out_last = self.fc(gru_out[-1, :, :])  # Shape: [batch_size, gru_hidden_size]
@@ -167,10 +137,10 @@ class Pi_ANN(nn.Module):
         #second_feature = second_feature[:, :, 0:]  # Ensure it has the last dimension as 1
 
         # Combine GRU output with the second feature
-        combined_input = torch.cat((gru_out_last_expanded, first_feature), dim=-1)          # combined_input shape: [batch_size, 10, gru_hidden_size + 1]
+        combined_input = torch.cat((gru_out_last_expanded, first_feature.transpose(0,1).unsqueeze(-1)), dim=1) # combined_input shape: [batch_size, 10, gru_hidden_size + 1]
 
         # Process through the rest of the network
-        h = self.g(self.prop_in_to_h(combined_input[:, -1, :]))  # Only using the last time step
+        h = self.g(self.prop_in_to_h(combined_input.squeeze(-1)))
 
         for prop in self.prop_h_to_h:
             h = self.g(prop(h))
@@ -184,17 +154,14 @@ class Pi_ANN(nn.Module):
         y = self.scale * y 
 
         return y
-    
+
 class DDPG():
 
-    def __init__(self, env: Environment, gru: None , I_max=10, 
+    def __init__(self, env: Environment, gru: RNN , I_max=10, 
                  gamma=0.99,  
                  n_nodes=36, n_layers=6, 
-                 seq_length = 10,
-                 n_ahead    = 1,
-                 gru_hidden_size= 20,
-                 gru_num_layers = 10,
-                 lr=1e-3, sched_step_size = 50, tau=0.001, ######################################################################## era sched_step_size = 50, 150
+                 lr=1e-3, sched_step_size = 50, tau=0.001, seq_length=10, n_ahead=1,
+                 gru_hidden_size = 20, gru_num_layers=10, 
                  name=""):
 
         self.gamma = gamma
@@ -205,11 +172,12 @@ class DDPG():
         self.sched_step_size = sched_step_size
         self.lr = lr
         self.seq_length = seq_length
-        self.n_ahead    = n_ahead   
-        self.gru_hidden_size= gru_hidden_size
-        self.gru_num_layers = gru_num_layers 
+        self.n_ahead = n_ahead
+        self.lg = nn.Softmax(dim=1)
         self.tau = tau
-        
+        self.gru_hidden_size = gru_hidden_size
+        self.gru_num_layers  = gru_num_layers 
+
         self.__initialize_NNs__()
         
         self.S = []
@@ -219,30 +187,17 @@ class DDPG():
         self.epsilon = []
         
         self.Q_loss = []
-        self.gru_loss = []
         self.pi_loss = []
+        self.gru = gru
+        self.gru.model.load_state_dict(torch.load('model.pth')) # load the model
+        
         self.env = env
-        self.reward = []
-
 
     def __initialize_NNs__(self):
-        # gru for stock price prediction 
-        #
-        # features = S
-        #
-        self.gru = {'net': gru(input_size=1,
-                                gru_hidden_size=10,
-                                gru_num_layers=20,
-                                output_size=1,
-                                lin_hidden_size=128,
-                                dropout_rate=0.0)}  
-                                 
-        self.gru['optimizer'] = optim.AdamW(self.gru['net'].parameters(), lr=self.lr)
-        self.gru['scheduler'] = optim.lr_scheduler.StepLR(self.gru['optimizer'], step_size=self.sched_step_size, gamma=0.99)
-
+        
         # policy approximation
         #
-        # features = S, I
+        # features = S, I, theta_estim_1, theta_estim_2, theta_estim_3
         #
         self.pi = {'net': Pi_ANN(n_in=2, 
                               n_out=1, 
@@ -258,7 +213,7 @@ class DDPG():
         
         # Q - function approximation
         #
-        # features = S, I, a=Ip
+        # features = S, I, a=Ip, theta_estim_1, theta_estim_2, theta_estim_3
         #
         self.Q_main = {'net' : Q_ANN(n_in=3, 
                                   n_out=1,
@@ -276,24 +231,24 @@ class DDPG():
         
         optimizer = optim.AdamW(net['net'].parameters(),
                                 lr=self.lr)
-            
+                    
+        # scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma = 0.99)
         scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=self.sched_step_size,  gamma=0.99)
     
         return optimizer, scheduler
     
     def __stack_state__(self, S, I):
 
-        return torch.cat((
-            (S/self.env.S_0-1.0).to(device), #S.unsqueeze(-1),#
-            (I/self.I_max  ).to(device), 
-            ), axis=1)
+        return torch.cat(((S/self.env.S_0-1.0).squeeze(0).to(device),
+                          (I/self.I_max  ).unsqueeze(0).to(device)) , axis = 0)
   
     def __grab_mini_batch__(self, mod_type = 'MC', mini_batch_size = 256):
         
         t = torch.rand((mini_batch_size))*self.env.N
         S, I, theta_true = self.env.Randomize_Start(type_mod = mod_type, batch_size = mini_batch_size)
+        # da qui escono già come snippets
 
-        return t, S, I
+        return t, S, I#, theta_true
     
     def create_snippets(self, x, theta=None):
         
@@ -320,16 +275,16 @@ class DDPG():
 
     def obtain_data(self, mini_batch_size = 256, N =  12, train = True):
             
-        S, _, theta_true = self.env.Simulate(s0=self.env.S_0 + 3*self.env.start_inv_vol*torch.randn(mini_batch_size, ), 
+        S, _, theta_true = self.env.Simulate(s0=self.env.S_0 + 3*self.env.inv_vol*torch.randn(mini_batch_size, ), 
                                              i0=self.I_max * (2*torch.rand(mini_batch_size)-1), 
                                              model = 'MC', batch_size=mini_batch_size, ret_reward = False, 
                                              I_p = 0, N = N)
 
-        I = self.I_max * (2*torch.rand(1, 1, mini_batch_size)-1)
+        I = self.I_max * (2*torch.rand(mini_batch_size, S.shape[1])-1)
         
         if train == True:   
 
-            return S, I
+            return S, I#, theta_pred, theta_pred_p
         
         else:
 
@@ -337,9 +292,9 @@ class DDPG():
         
     def make_reward(self, batch_S, batch_S_p, batch_I, I_p):
 
-        q = I_p-batch_I.reshape(-1,1).to(device)
+        q = I_p.squeeze(-1)-batch_I.to(device)
 
-        r = I_p*(batch_S_p.to(device).unsqueeze(-1)-batch_S.to(device).unsqueeze(-1)) - self.env.lambd*torch.abs(q)
+        r = I_p.squeeze(-1)*(batch_S_p.to(device)-batch_S.to(device)) - self.env.lambd*torch.abs(q)
 
         return r
     
@@ -354,57 +309,50 @@ class DDPG():
     def Update_Q(self, mini_batch_size=256, epsilon=0.02, n_iter_Q=1):
 
         for i in range(n_iter_Q):
-
-            batch_S, batch_I = self.obtain_data(mini_batch_size, N = self.seq_length+3)
-
-            #self.gru['net'].zero_grad()
+            
+            batch_S, batch_I = self.obtain_data(mini_batch_size, N = self.env.N+1)
 
             S_gru = self.create_snippets(batch_S[:, : self.seq_length+1].T)[0]
 
             self.Q_main['optimizer'].zero_grad()
-
+    
             # concatenate states
-            X = self.__stack_state__(
-                                    S_gru, 
-                                    batch_I,
-                                    )
-
-            I_p = self.pi['net'].to(device)(X.transpose(0,2)).detach() * torch.exp(-0.5*epsilon**2+epsilon*torch.randn(batch_S.shape[0],1)).to(device)
-
-            Q = self.Q_main['net'].to(device)(torch.cat((X, I_p.unsqueeze(-1).transpose(0,2)/self.I_max),axis=1) )
-
+            X = self.__stack_state__(S_gru,#batch_S[:,self.seq_length-1], 
+                                     batch_I[:,self.seq_length-1]) 
+            
+            I_p = self.pi['net'].to(device)(X).detach() * torch.exp(-0.5*epsilon**2+epsilon*torch.randn(batch_S.shape[0],1)).to(device)
+    
+            Q = self.Q_main['net'].to(device)( torch.cat((X.transpose(0,1), I_p/self.I_max),axis=-1) )
+            
             # step in the environment
             r = self.make_reward(batch_S[:, self.seq_length-1], 
                                  batch_S[:, self.seq_length], 
-                                 batch_I, I_p)
-            
-            self.reward.append(r.cpu().detach().numpy())
+                                 batch_I[:, self.seq_length-1]
+                                 , I_p)
 
-            # compute the Q(S', a*)
 
             S_gru_p, y = self.create_snippets(batch_S[:, 1 : self.seq_length+2].T)
             
-            X_p = self.__stack_state__(S_gru_p,
-                                       I_p.unsqueeze(-1).transpose(0,2),)
+            # compute the Q(S', a*)
+            X_p = self.__stack_state__(S_gru_p, I_p.squeeze(-1))   
 
             # optimal policy at t+1
-            I_pp = self.pi['net'].to(device)(X_p.transpose(0,2)).detach()
-
+            I_pp = self.pi['net'].to(device)(X_p).detach()
+        
             # compute the target for Q
-            target = r + self.gamma * self.Q_target['net'].to(device)(torch.cat((X_p, I_pp.unsqueeze(1).transpose(0,2)/self.I_max),axis=1))
-            
+            target = r + self.gamma * self.Q_target['net'].to(device)(torch.cat((X_p.transpose(0,1), I_pp/self.I_max), axis=1)).squeeze(-1)
+        
             loss = torch.mean((target.detach() - Q)**2)
-
+        
             loss.backward()
-            
+    
             # perform step using those gradients
             self.Q_main['optimizer'].step()                
             self.Q_main['scheduler'].step() 
+        
             self.Q_loss.append(loss.item())
 
-            
-
-            self.soft_update(self.Q_main['net'], self.Q_target['net'])
+            self.soft_update( self.Q_main['net'], self.Q_target['net'])
         
     def soft_update(self, main, target):
     
@@ -415,17 +363,18 @@ class DDPG():
 
         for i in range(n_iter_pi):
             
-            batch_S, batch_I = self.obtain_data(mini_batch_size, N = self.seq_length+3)
+            batch_S, batch_I = self.obtain_data(mini_batch_size, N = self.env.N+1)
 
             S_gru, _ = self.create_snippets(batch_S[:, : self.seq_length+1].T)
 
             self.pi['optimizer'].zero_grad()
 
-            X = self.__stack_state__(S_gru, batch_I)
-
-            I_p = self.pi['net'].to(device)(X.transpose(0,2))
+            X = self.__stack_state__(S_gru, 
+                                     batch_I[:,self.seq_length-1]) 
+        
+            I_p = self.pi['net'].to(device)(X)
             
-            Q = self.Q_main['net'].to(device)(torch.cat((X, I_p.unsqueeze(-1).transpose(0,2)/self.I_max),axis=1) )
+            Q = self.Q_main['net'].to(device)( torch.cat((X.transpose(0,1), I_p/self.I_max),axis=-1) )
             
             loss = -torch.mean(Q)# -
                 
@@ -437,7 +386,6 @@ class DDPG():
             self.pi_loss.append(loss.item())
 
     def train(self, n_iter=1_000, n_iter_Q= 1, n_iter_pi = 10, mini_batch_size=256, n_plot=100):
-
         C = 100
         D = 100
         
@@ -457,8 +405,7 @@ class DDPG():
             if np.mod(i+1,n_plot) == 0:
                 
                 self.loss_plots()
-                self.run_strategy(name= datetime.now().strftime("%H_%M_%S"), N = 500, no_plots = False)
-                np.save('reward.npy', self.reward)
+                self.run_strategy(name= datetime.now().strftime("%H_%M_%S"), N = 500)
 
     def moving_average(self, x, n):
         
@@ -503,76 +450,96 @@ class DDPG():
 
     def run_strategy(self, name= datetime.now().strftime("%H_%M_%S"), N = 12, no_plots = False):
 
-        #S = torch.zeros((1, N+2)).float()         
+        S = torch.zeros((1, N+2)).float().to(device)         
         I = torch.zeros((1, N+2)).float().to(device)
         r = torch.zeros((1, N+2)).float().to(device)
+        theta_post_m = torch.zeros((N-self.seq_length, 3)).float()
 
         S = self.obtain_data(mini_batch_size   =  1, N = N, train = False)
 
         for t in range(N-self.seq_length):
 
-            #S = self.gru['net'](S_[:, t: t+self.seq_length].unsqueeze(-1)).detach()
-            
-            X = self.__stack_state__(S[:, t:t+self.seq_length].T.unsqueeze(0), I[:, t].reshape(1,1,-1))
+            #theta_post= self.get_theta(S[:, t:t+self.seq_length+1])
 
-            I[:, t+1] = self.pi['net'].to(device)(X.transpose(0,2)).reshape(-1).detach().unsqueeze(-1) #torch.normal(0.0, 2.0, (1,1))#
-            
-            r[:, t] = self.make_reward( S[:,t+self.seq_length-1], 
-                                        S[:,t+self.seq_length],
-                                        I[:,t], 
-                                        I[:,t+1])
+            #theta_post_m[t, :] = theta_post
+
+            X = self.__stack_state__(S[:, t:t+self.seq_length-1].T, I[:, t+self.seq_length-1].T)
+
+            I[:, t+self.seq_length] = self.pi['net'].to(device)(X).reshape(-1).detach().unsqueeze(-1)
+
+            r[:, t+1] = self.make_reward(S[:,t+self.seq_length-1], 
+                                         S[:,t+self.seq_length],
+                                         I[:,t+self.seq_length-1], 
+                                         I[:,t+self.seq_length])
 
         I  =    I.detach().cpu().numpy()
         r =     r.detach().cpu().numpy()
 
 
         if no_plots == False:
+            # t = N#
             a = self.env.dt*np.arange(0, N)/self.env.T
             t = a[:-(self.seq_length + 2)]
             plt.figure(figsize=(5,5))
+            n_paths = 3
 
+            #plt.figure(figsize=(10, 15))
+
+            #plt.subplot(2,1, 1)
             fig, ax1 = plt.subplots()
 
-            ax1.plot((S[:,self.seq_length:-self.seq_length + 2]).squeeze(0).numpy(), label = 'Stock price')
+            ax1.plot((S[:,self.seq_length:-2]).squeeze(0).numpy(), label = 'Stock price')
             ax1.set_ylabel('Stock price')
             ax1.set_xlabel('Time')
             ax1.legend(loc='upper left')
 
             ax2 = ax1.twinx()
-            ax2.plot((I[:,self.seq_length:-self.seq_length *2]).squeeze(0), color='red', label = 'Inventory', alpha=0.5)
+            ax2.plot((I[:,self.seq_length:-2]).squeeze(0), color='red', label = 'Inventory')
             ax2.set_ylabel('Inventory')
             ax2.legend(loc='upper right')
 
             plt.title("Stock price and Inventory")
             plt.show()
 
+            #plt.subplot(3,1, 2)
+             #(t, I.squeeze(0).numpy(), 2, r"$I_t$")
+            #plt.title("Inventory")
+
+            #plt.subplot(2,1, 2)
             plt.plot(np.cumsum(r.squeeze(0)))
             plt.title("cumulative return")
 
+            #plt.subplot(4,1, 4)
+            #plt.hist(r.squeeze(0), bins=51)
+            #plt.title("histogram of returns")
             plt.tight_layout()
         
             #plt.savefig("path_"  +self.name + "_" + name + ".pdf", format='pdf', bbox_inches='tight')
             plt.show()
 
-            np.save('S.npy', S)
-            np.save('I.npy', I)
+            S = S.detach().numpy()
+            
+            theta_post_m = theta_post_m.detach().numpy()
 
-            return r, S, I
+
+            return r, S, I, theta_post_m
         
         if no_plots == True:
-            return r, S, I
-        
+
+            return r    
+
     def run_strategy_rolling(self, name=datetime.now().strftime("%H_%M_%S"), N=12, no_plots=False):
         S = torch.zeros((1, N+2)).float()         
-        I = torch.zeros((1, N)).float()
+        I = torch.zeros((1, N+2)).float()
         r = torch.zeros((1, N+2)).float()
         theta_post = torch.zeros((1, N+2)).float()
     
         S = self.obtain_data(mini_batch_size=1, N=N, train=False)
     
         for t in range(N-self.seq_length):
+            theta_post = self.get_theta(S[:, t:t+self.seq_length+1])
     
-            X = self.__stack_state__(S[:, t+self.seq_length-1].T, I[:, t+self.seq_length-1].T)
+            X = self.__stack_state__(S[:, t+self.seq_length-1].T, I[:, t+self.seq_length-1].T, theta_post)
     
             I[:, t+self.seq_length] = self.pi['net'](X).reshape(-1).detach().unsqueeze(-1)
     
@@ -587,7 +554,7 @@ class DDPG():
         if not no_plots:
             a = self.env.dt * np.arange(0, N) / self.env.T
             time_step = 100  # Length of each time frame
-            t = np.arange(0, N-(self.seq_length + 2))
+            t = np.arange(0, N-(self.seq_length + 2))#a[:-(self.seq_length + 2)]  
             max_t = t[-1]
             for start_t in range(int(max_t) - time_step + 1):  # Iterate one time step at a time
                 end_t = start_t + time_step
@@ -619,6 +586,7 @@ class DDPG():
     
         return r, S, I
         
+
     def run_strategy_rolling_gif(self, name=datetime.now().strftime("%H_%M_%S"), N=12, no_plots=False):
         S = torch.zeros((1, N+2)).float()         
         I = torch.zeros((1, N+2)).float()
@@ -686,7 +654,8 @@ class DDPG():
         
         if no_plots == True:
             return r
-     
+    
+    
     def plot_policy(self, name=""):
         NS = 101
         S = torch.linspace(self.env.S_0 - 5*self.env.inv_vol,
@@ -718,10 +687,10 @@ class DDPG():
         fig, ax = plt.subplots(1, 3, figsize=(15, 5), sharex=True, sharey=True)
         for i in range(len(pi_all)):
             pi1, pi2, pi3 = pi_all[i]
-            #theta_estim = torch.cat((pi1 * ones, pi2 * ones, pi3 * ones), axis=-1)
+            theta_estim = torch.cat((pi1 * ones, pi2 * ones, pi3 * ones), axis=-1)
             X = torch.cat(((Sm / self.env.S_0 - 1.0),
                            (Im / (self.I_max/2)),
-                           ), axis=-1)
+                           theta_estim), axis=-1)
             a = self.pi['net'](X).detach().squeeze()
             cs = plot(a, ax[i])
             #ax[i].set_title(f"$\pi_{{{i+1}}}$ high")

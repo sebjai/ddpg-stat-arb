@@ -25,16 +25,18 @@ class MR_env():
         
         self.S_0 = S_0
         self.theta = theta
-        self.kappa = kappa
         self.sigma = sigma
-        self.start_inv_vol = self.sigma/np.sqrt(2.0*self.kappa)
+        self.kappa = kappa
         self.lambd = lambd
         
         self.dt = dt  # time steps
         self.T = T
         self.N = int(self.T/self.dt)+1
         self.t = np.linspace(0,self.T, self.N)
-    
+        
+        self.inv_vol = self.sigma/np.sqrt(2.0*self.kappa)
+        self.eff_vol = self.sigma* np.sqrt((1-np.exp(-2*self.kappa*self.dt))/(2*self.kappa))
+        
         self.I_max = I_max
         
     def lognormal(self, sigma, batch_size=10):
@@ -44,14 +46,11 @@ class MR_env():
         
         #S = self.S_0 + 3*self.inv_vol*torch.randn(batch_size, self.N)
         #I = self.I_max * (2*torch.rand(batch_size, self.N)-1)
-        #start_inv_vol = self.sigma/np.sqrt(2.0*self.kappa[0])
-        S, _, theta = self.Simulate(self.S_0 + 3*self.start_inv_vol*torch.randn(batch_size, ),
-                             self.I_max * (2*torch.rand(batch_size,)-1), model = type_mod, batch_size = batch_size)
+        S, _, theta = self.Simulate(self.S_0 + 3*self.inv_vol*torch.randn(batch_size, ),
+                             self.I_max * (2*torch.rand(batch_size, self.N)-1), model = type_mod, batch_size = batch_size)
         I = self.I_max * (2*torch.rand(batch_size, self.N)-1)
         
-        #self.kappa = kappa[0]
-        
-        return S, I, theta, self.kappa
+        return S, I, theta
 
     def Simulate(self, s0, i0, model = 'exp', batch_size=10, ret_reward = False, I_p = 0, N = None):
         if N is None:
@@ -63,10 +62,8 @@ class MR_env():
         I = torch.zeros((batch_size, N)).float()
         I_p = torch.zeros(N).float()
         theta = torch.zeros((batch_size, N)).float()
-        #kappa = torch.zeros((batch_size, N)).float()
         r = torch.zeros((batch_size, N)).float()
         Z = torch.zeros((batch_size, N)).int()
-        Z_k = torch.zeros((batch_size, N)).int()
         theta[:] = torch.nan
         
         theta[:,0] = self.theta[0]
@@ -100,13 +97,24 @@ class MR_env():
                 return S, I, theta
     
         elif model == 'MC':
-            #theta 
+            
             labels = torch.tensor(np.arange(3)).int()
             states = torch.tensor([0.9000, 1.0000, 1.1000])
 
             trans_rate_matrix = torch.tensor([[-0.1,  0.05,  0.05],
                                               [ 0.05, -0.1 ,  0.05],
                                               [ 0.05,  0.05, -0.1]])
+            
+            # probabilities = linalg.expm(trans_rate_matrix * self.dt)
+
+            # theta[:,0] = torch.tensor(np.random.choice(states.numpy()))
+
+            # for t in range(1, self.N-1):
+                
+            #     for j in range(batch_size):
+            #         theta[j,t] = torch.tensor(np.random.choice(states, p = np.round(probabilities[np.where(states == theta[j, t-1])][0], 5)))#states[torch.choose(torch.tensor(probabilities), batch_size)]
+
+            #     S[:, t+1], I[:,t+1], _ = self.step(t*self.dt, S[:,t], I[:,t], 0*I[:,t], theta[:,t])
 
             probs = torch.tensor(linalg.expm(trans_rate_matrix * self.dt)).float()
             cumsum_probs = torch.cumsum(probs, axis=1)
@@ -117,26 +125,24 @@ class MR_env():
             for t in range(N-1):
                 
                 # step in the environment
-                S[:, t+1], I[:,t+1], _ = self.step(t*self.dt, S[:,t], I[:,t], I[:, t+1], theta[:,t], self.kappa, batch_size = batch_size)
+                S[:, t+1], I[:,t+1], _ = self.step(t*self.dt, S[:,t], I[:,t], I[:, t+1], theta[:,t], batch_size = batch_size)
                 
                 # evolve the MC
                 U = torch.rand(batch_size,1)
                 Z[:,t+1] = torch.sum((cumsum_probs[Z[:,t]] < U), axis=1).int()
                 theta[:,t+1] = states[Z[:,t+1]]
-                ####          
 
             if ret_reward == True:
                 return S, I, theta, r
             else:
-                return S, I, theta,
+                return S, I, theta
 
-    def step(self, t, S, I, I_p, theta, kappa, batch_size=10):
+    def step(self, t, S, I, I_p, theta, batch_size=10):
         
-        inv_vol = self.sigma/np.sqrt(2.0*kappa)
-        eff_vol = self.sigma* np.sqrt((1-np.exp(-2*kappa*self.dt))/(2*kappa))
+        #batch_size = S.shape[0]
         
-        S_p = theta + (S-theta)*np.exp(-kappa*self.dt) \
-            + eff_vol *  torch.randn(S.shape )#(S.shape)
+        S_p = theta + (S-theta)*np.exp(-self.kappa*self.dt) \
+            + self.eff_vol *  torch.randn(S.shape )#(S.shape)
 
         q = I_p-I
 
