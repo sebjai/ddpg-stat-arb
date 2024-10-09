@@ -463,7 +463,9 @@ class DDPG():
 
             #theta_post_m[t, :] = theta_post
 
-            X = self.__stack_state__(S[:, t:t+self.seq_length-1].T, I[:, t+self.seq_length-1].T)
+            S_gru, _ = self.create_snippets(S[:, t : t+self.seq_length+1].T)
+
+            X = self.__stack_state__(S_gru, I[:, t+self.seq_length-1])#S[:, t:t+self.seq_length-1].T
 
             I[:, t+self.seq_length] = self.pi['net'].to(device)(X).reshape(-1).detach().unsqueeze(-1)
 
@@ -488,7 +490,7 @@ class DDPG():
             #plt.subplot(2,1, 1)
             fig, ax1 = plt.subplots()
 
-            ax1.plot((S[:,self.seq_length:-2]).squeeze(0).numpy(), label = 'Stock price')
+            ax1.plot((S[:,:-2]).squeeze(0).numpy(), label = 'Stock price')
             ax1.set_ylabel('Stock price')
             ax1.set_xlabel('Time')
             ax1.legend(loc='upper left')

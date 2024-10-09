@@ -32,13 +32,13 @@ ddpg = DDPG(env, gru = model, I_max = 10,
             lr= 0.001,
             n_nodes=20, n_layers=5, 
             seq_length=10,
-            gru_hidden_size = 30,
+            gru_hidden_size = 20,
             gru_num_layers = 10, 
             n_ahead=1,
             name="test" )
 
 # %%        
-ddpg.train(n_iter=10_000, n_iter_Q = 1, n_iter_pi = 5, n_plot=100, mini_batch_size=36)
+ddpg.train(n_iter=10_000, n_iter_Q = 1, n_iter_pi = 5, n_plot=100, mini_batch_size=32)
 
 #import torch
 #torch.save(ddpg.pi['net'].state_dict(), 'pi.pth')
