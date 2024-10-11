@@ -21,7 +21,7 @@ model = gru_pred(T=40,
 
 env = MR_env(S_0 = model.env.S_0 , kappa = model.env.kappa, sigma = model.env.sigma, theta = model.env.theta,
              dt = model.env.dt, T = model.env.T, 
-             I_max = 10, lambd = 0.05)
+             I_max = 10, lambd = 0.05)#0.05  model.env.sigma
 
 #gru = gru_pred(T = env.T, dt = env.dt, learning_rate = 0.001,
 #                 seq_length = 10, n_ahead = 1, 
@@ -30,7 +30,7 @@ env = MR_env(S_0 = model.env.S_0 , kappa = model.env.kappa, sigma = model.env.si
 ddpg = DDPG(env, gru = model, I_max = 10,
             gamma = 0.999, 
             lr= 0.001,
-            n_nodes=20, n_layers=5, 
+            n_nodes=20, n_layers=50, ####cambiato n_layers da 5 a 50
             seq_length=10,
             gru_hidden_size = 20,
             gru_num_layers = 10, 
@@ -38,8 +38,8 @@ ddpg = DDPG(env, gru = model, I_max = 10,
             name="test" )
 
 # %%        
-ddpg.train(n_iter=10_000, n_iter_Q = 1, n_iter_pi = 5, n_plot=100, mini_batch_size=32)
-
+ddpg.train(n_iter=10_000, n_iter_Q = 1, n_iter_pi = 5, n_plot=100, mini_batch_size=512)
+#%%
 #import torch
 #torch.save(ddpg.pi['net'].state_dict(), 'pi.pth')
 #torch.save(ddpg.Q_main['net'].state_dict(), 'Q.pth')
@@ -47,7 +47,7 @@ ddpg.train(n_iter=10_000, n_iter_Q = 1, n_iter_pi = 5, n_plot=100, mini_batch_si
 import torch
 ddpg.pi['net'].load_state_dict(torch.load('pi.pth'))
 r, S, I, theta_post = ddpg.run_strategy(N=2000)
-ddpg.plot_policy()
+#ddpg.plot_policy()
 import numpy as np
 np.save('S.npy', S)
 np.save('I.npy', I)

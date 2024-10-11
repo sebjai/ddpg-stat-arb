@@ -588,7 +588,6 @@ class DDPG():
     
         return r, S, I
         
-
     def run_strategy_rolling_gif(self, name=datetime.now().strftime("%H_%M_%S"), N=12, no_plots=False):
         S = torch.zeros((1, N+2)).float()         
         I = torch.zeros((1, N+2)).float()
@@ -656,7 +655,6 @@ class DDPG():
         
         if no_plots == True:
             return r
-    
     
     def plot_policy(self, name=""):
         NS = 101
